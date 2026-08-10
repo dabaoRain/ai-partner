@@ -7,7 +7,7 @@
       <span>新建会话</span>
     </button>
 
-    <div class="chat-sidebar__section">
+    <div class="chat-sidebar__section chat-sidebar__section--history">
       <div class="chat-sidebar__label">历史会话</div>
       <ul class="chat-sidebar__history">
         <li
@@ -200,6 +200,34 @@ defineEmits(['create', 'select', 'remove', 'update:name', 'update:personality'])
 
     &:hover {
       background: rgba(255, 255, 255, 0.08);
+    }
+  }
+}
+
+@media (max-width: $breakpoint-mobile) {
+  .chat-sidebar {
+    position: fixed;
+    inset: 0 auto 0 0;
+    z-index: 20;
+    width: min(#{$sidebar-width}, 85vw);
+    transform: translateX(-100%);
+    transition: transform 0.2s ease;
+    box-shadow: 4px 0 24px rgba(0, 0, 0, 0.35);
+
+    &.is-open {
+      transform: translateX(0);
+    }
+
+    // 历史列表吃剩余高度，避免矮屏挤爆
+    &__section--history {
+      flex: 1;
+      min-height: 0;
+    }
+
+    &__history {
+      flex: 1;
+      min-height: 0;
+      max-height: none;
     }
   }
 }

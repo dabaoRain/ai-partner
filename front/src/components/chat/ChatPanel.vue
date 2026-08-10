@@ -1,7 +1,15 @@
 <template>
   <section class="chat-panel">
     <header class="chat-panel__header">
-      <div>
+      <button
+        class="chat-panel__menu"
+        type="button"
+        title="打开控制面板"
+        @click="appStore.toggleSidebar()"
+      >
+        <el-icon :size="22"><Fold /></el-icon>
+      </button>
+      <div class="chat-panel__header-text">
         <h1 class="chat-panel__title">AI智能伴侣</h1>
         <p class="chat-panel__session">当前会话: {{ sessionId || '暂无会话' }}</p>
       </div>
@@ -105,8 +113,10 @@ import {
   Promotion,
   Microphone,
   EditPen,
+  Fold,
 } from '@element-plus/icons-vue'
 import { useSpeechRecognition } from '@/composables/useSpeechRecognition'
+import { useAppStore } from '@/store/app'
 
 const props = defineProps({
   sessionId: {
@@ -124,6 +134,7 @@ const props = defineProps({
 })
 
 const emit = defineEmits(['send'])
+const appStore = useAppStore()
 
 const draft = ref('')
 const listRef = ref(null)
@@ -254,6 +265,34 @@ watch(
 
   &__header {
     padding: 28px 28px 12px;
+    display: flex;
+    align-items: flex-start;
+    gap: 12px;
+  }
+
+  &__menu {
+    display: none;
+    flex-shrink: 0;
+    width: 40px;
+    height: 40px;
+    margin-top: 2px;
+    border: none;
+    border-radius: $radius-md;
+    padding: 0;
+    align-items: center;
+    justify-content: center;
+    background: $input-color;
+    color: $text-color;
+    cursor: pointer;
+
+    &:active {
+      opacity: 0.85;
+    }
+  }
+
+  &__header-text {
+    flex: 1;
+    min-width: 0;
   }
 
   &__title {
@@ -268,6 +307,9 @@ watch(
     margin: 8px 0 0;
     font-size: 14px;
     color: $text-secondary;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
 
   &__messages {
@@ -357,7 +399,7 @@ watch(
   }
 
   &__footer {
-    padding: 12px 28px 24px;
+    padding: 12px 28px calc(24px + env(safe-area-inset-bottom, 0px));
   }
 
   // 豆包风格单条输入框
@@ -494,6 +536,41 @@ watch(
   40% {
     transform: translateY(-4px);
     opacity: 1;
+  }
+}
+
+@media (max-width: $breakpoint-mobile) {
+  .chat-panel {
+    &__header {
+      padding: 12px 16px 8px;
+    }
+
+    &__menu {
+      display: inline-flex;
+    }
+
+    &__title {
+      font-size: 22px;
+    }
+
+    &__session {
+      margin-top: 4px;
+      font-size: 12px;
+    }
+
+    &__messages {
+      padding: 8px 16px 12px;
+      gap: 14px;
+    }
+
+    &__footer {
+      padding: 8px 16px calc(12px + env(safe-area-inset-bottom, 0px));
+    }
+
+    &__bubble {
+      padding: 12px 14px;
+      font-size: 14px;
+    }
   }
 }
 </style>

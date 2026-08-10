@@ -1,12 +1,18 @@
 <template>
   <div class="home-view">
+    <div
+      v-if="isMobile && !appStore.sidebarCollapsed"
+      class="home-view__mask"
+      @click="appStore.closeSidebar()"
+    />
     <ChatSidebar
       v-model:name="partnerName"
       v-model:personality="personality"
       :sessions="sessions"
       :active-id="activeSessionId"
-      @create="createSession"
-      @select="selectSession"
+      :class="{ 'is-open': isMobile && !appStore.sidebarCollapsed }"
+      @create="handleCreate"
+      @select="handleSelect"
       @remove="removeSession"
     />
     <ChatPanel
@@ -19,10 +25,12 @@
 </template>
 
 <script setup>
-import { computed, onMounted, ref } from "vue";
+import { computed, onMounted, ref, watch } from "vue";
 import { ElMessage } from "element-plus";
 import ChatSidebar from "@/components/chat/ChatSidebar.vue";
 import ChatPanel from "@/components/chat/ChatPanel.vue";
+import { useAppStore } from "@/store/app";
+import { useWindowSize } from "@/composables/useWindowSize";
 import {
   createSession as createSessionApi,
   deleteSession,
@@ -30,6 +38,9 @@ import {
   fetchSessions,
   sendChatStream,
 } from "@/api/chat";
+
+const appStore = useAppStore();
+const { isMobile } = useWindowSize();
 
 const partnerName = ref("小美");
 const personality = ref("温柔可爱一口台湾腔的台湾妹子");
@@ -44,6 +55,19 @@ const activeMessages = computed(() => {
   );
   return current ? current.messages : [];
 });
+
+// 宽屏强制展开侧栏；切到窄屏时收起
+watch(
+  isMobile,
+  (mobile) => {
+    if (mobile) {
+      appStore.closeSidebar();
+    } else {
+      appStore.openSidebar();
+    }
+  },
+  { immediate: true },
+);
 
 function mapSessionItem(item, messages = []) {
   return {
@@ -98,6 +122,13 @@ async function createSession() {
   return res.session_id;
 }
 
+async function handleCreate() {
+  await createSession();
+  if (isMobile.value) {
+    appStore.closeSidebar();
+  }
+}
+
 async function selectSession(id) {
   if (sending.value) {
     ElMessage.info("正在回复中，请稍后再切换会话");
@@ -115,6 +146,13 @@ async function selectSession(id) {
   }
   if (current) {
     current.messages = detail.messages || [];
+  }
+}
+
+async function handleSelect(id) {
+  await selectSession(id);
+  if (isMobile.value) {
+    appStore.closeSidebar();
   }
 }
 
@@ -216,5 +254,13 @@ onMounted(() => {
   display: flex;
   overflow: hidden;
   background: $bg-color;
+  position: relative;
+
+  &__mask {
+    position: fixed;
+    inset: 0;
+    z-index: 15;
+    background: rgba(0, 0, 0, 0.45);
+  }
 }
 </style>
