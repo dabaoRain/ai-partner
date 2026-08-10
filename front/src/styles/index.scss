@@ -1,0 +1,57 @@
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#app {
+  margin: 0;
+  padding: 0;
+  width: 100%;
+  height: 100%;
+}
+
+body {
+  font-family:
+    'PingFang SC',
+    'Helvetica Neue',
+    Arial,
+    'Hiragino Sans GB',
+    'Microsoft YaHei',
+    sans-serif;
+  color: $text-color;
+  background: $bg-color;
+  -webkit-font-smoothing: antialiased;
+}
+
+a {
+  color: inherit;
+  text-decoration: none;
+}
+
+ul,
+ol {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+// Element Plus 暗色输入框统一风格
+.el-input__wrapper,
+.el-textarea__inner {
+  background-color: $input-color !important;
+  box-shadow: 0 0 0 1px $border-color inset !important;
+  color: $text-color !important;
+}
+
+.el-input__inner,
+.el-textarea__inner {
+  color: $text-color !important;
+}
+
+.el-input__wrapper.is-focus,
+.el-textarea__inner:focus {
+  box-shadow: 0 0 0 1px $primary-color inset !important;
+}

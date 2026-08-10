@@ -1,0 +1,5 @@
+node_modules
+dist
+*.local
+.DS_Store
+.eslintrc-auto-import.json
