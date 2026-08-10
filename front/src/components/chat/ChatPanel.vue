@@ -36,19 +36,57 @@
     </div>
 
     <footer class="chat-panel__footer">
-      <div class="chat-panel__input-wrap">
-        <el-input
-          v-model="draft"
-          class="chat-panel__input"
-          placeholder="请输入您的问题..."
-          :disabled="sending"
-          @keyup.enter="handleSend"
-        />
+      <!-- 豆包式输入条：左侧切换 + 中间输入/按住说话 + 右侧发送 -->
+      <div
+        class="chat-panel__composer"
+        :class="{ 'is-voice-mode': voiceMode, 'is-listening': listening }"
+      >
         <button
+          class="chat-panel__mode"
+          type="button"
+          :disabled="sending || listening"
+          :title="voiceMode ? '切换到键盘输入' : '切换到语音输入'"
+          @click="toggleInputMode"
+        >
+          <el-icon :size="20">
+            <Microphone v-if="!voiceMode" />
+            <EditPen v-else />
+          </el-icon>
+        </button>
+
+        <div class="chat-panel__composer-main">
+          <input
+            v-if="!voiceMode"
+            v-model="draft"
+            class="chat-panel__text"
+            type="text"
+            placeholder="请输入您的问题..."
+            :disabled="sending"
+            @keyup.enter="handleSend"
+          />
+
+          <button
+            v-else
+            class="chat-panel__hold"
+            type="button"
+            :disabled="sending || !supported"
+            :title="voiceTitle"
+            @contextmenu.prevent
+            @pointerdown="handleVoiceStart"
+            @pointerup="handleVoiceEnd"
+            @pointercancel="handleVoiceEnd"
+            @pointerleave="handleVoiceEnd"
+          >
+            {{ voiceLabel }}
+          </button>
+        </div>
+
+        <button
+          v-if="!voiceMode"
           class="chat-panel__send"
           type="button"
           title="发送"
-          :disabled="sending"
+          :disabled="sending || !draft.trim()"
           @click="handleSend"
         >
           <el-icon :size="20"><Promotion /></el-icon>
@@ -59,8 +97,16 @@
 </template>
 
 <script setup>
-import { nextTick, ref, watch } from 'vue'
-import { UserFilled, Monitor, Promotion } from '@element-plus/icons-vue'
+import { computed, nextTick, ref, watch } from 'vue'
+import { ElMessage } from 'element-plus'
+import {
+  UserFilled,
+  Monitor,
+  Promotion,
+  Microphone,
+  EditPen,
+} from '@element-plus/icons-vue'
+import { useSpeechRecognition } from '@/composables/useSpeechRecognition'
 
 const props = defineProps({
   sessionId: {
@@ -81,6 +127,24 @@ const emit = defineEmits(['send'])
 
 const draft = ref('')
 const listRef = ref(null)
+const voiceMode = ref(false)
+const voiceStartedAt = ref(0)
+const shouldSendVoice = ref(false)
+
+const { supported, listening, start, stop, cancel } = useSpeechRecognition({
+  lang: 'zh-CN',
+})
+
+const voiceLabel = computed(() => {
+  if (!supported.value) return '当前浏览器不支持语音'
+  if (listening.value) return '松开发送'
+  return '按住 说话'
+})
+
+const voiceTitle = computed(() => {
+  if (!supported.value) return '请使用 Chrome，并确保 HTTPS/localhost'
+  return '按住说话，松手后发送给 AI'
+})
 
 /** 空气泡且正在等待流式首包时展示 thinking */
 function isThinking(msg, index) {
@@ -99,12 +163,62 @@ async function scrollToBottom() {
   }
 }
 
+function toggleInputMode() {
+  if (props.sending || listening.value) return
+  if (!voiceMode.value && !supported.value) {
+    ElMessage.warning('当前浏览器不支持语音识别，请使用 Chrome')
+    return
+  }
+  voiceMode.value = !voiceMode.value
+}
+
 function handleSend() {
-  if (props.sending) return
+  if (props.sending || listening.value || voiceMode.value) return
   const text = draft.value.trim()
   if (!text) return
   emit('send', text)
   draft.value = ''
+}
+
+function handleVoiceStart(event) {
+  if (props.sending || !supported.value || listening.value) return
+  if (event.button !== undefined && event.button !== 0) return
+
+  event.currentTarget.setPointerCapture?.(event.pointerId)
+  shouldSendVoice.value = true
+  voiceStartedAt.value = Date.now()
+
+  const ok = start({
+    onFinal(text) {
+      const elapsed = Date.now() - voiceStartedAt.value
+      const canSend = shouldSendVoice.value && elapsed >= 500 && text
+      shouldSendVoice.value = false
+
+      if (!canSend) {
+        if (elapsed < 500 && text) {
+          ElMessage.info('说话时间太短，请按住再说一次')
+        } else if (!text && elapsed >= 500) {
+          ElMessage.info('没有识别到内容，请重试')
+        }
+        return
+      }
+
+      emit('send', text)
+    },
+    onError(message) {
+      shouldSendVoice.value = false
+      ElMessage.error(message)
+    },
+  })
+
+  if (!ok) {
+    shouldSendVoice.value = false
+  }
+}
+
+function handleVoiceEnd() {
+  if (!listening.value) return
+  stop()
 }
 
 watch(
@@ -116,6 +230,16 @@ watch(
     scrollToBottom()
   },
   { immediate: true }
+)
+
+watch(
+  () => props.sending,
+  (value) => {
+    if (value && listening.value) {
+      shouldSendVoice.value = false
+      cancel()
+    }
+  }
 )
 </script>
 
@@ -236,28 +360,34 @@ watch(
     padding: 12px 28px 24px;
   }
 
-  &__input-wrap {
-    position: relative;
-  }
+  // 豆包风格单条输入框
+  &__composer {
+    min-height: 52px;
+    padding: 6px 8px;
+    border-radius: 26px;
+    background: $input-color;
+    border: 1px solid $border-color;
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    transition:
+      border-color 0.15s ease,
+      background 0.15s ease,
+      box-shadow 0.15s ease;
 
-  &__input {
-    :deep(.el-input__wrapper) {
-      min-height: 48px;
-      padding-right: 48px;
-      border-radius: $radius-md;
-      background: $input-color !important;
+    &.is-listening {
+      border-color: $primary-color;
+      background: rgba(255, 90, 42, 0.12);
+      box-shadow: 0 0 0 1px rgba(255, 90, 42, 0.25);
     }
   }
 
-  &__send {
-    position: absolute;
-    right: 10px;
-    top: 50%;
-    transform: translateY(-50%);
-    width: 34px;
-    height: 34px;
+  &__mode {
+    width: 40px;
+    height: 40px;
+    flex-shrink: 0;
     border: none;
-    border-radius: 8px;
+    border-radius: 50%;
     display: inline-flex;
     align-items: center;
     justify-content: center;
@@ -265,13 +395,89 @@ watch(
     color: $text-secondary;
     cursor: pointer;
 
-    &:hover {
+    &:hover:not(:disabled) {
       color: $primary-color;
       background: rgba(255, 90, 42, 0.12);
     }
 
     &:disabled {
       opacity: 0.45;
+      cursor: not-allowed;
+    }
+  }
+
+  &__composer-main {
+    flex: 1;
+    min-width: 0;
+    height: 40px;
+    display: flex;
+    align-items: center;
+  }
+
+  &__text {
+    width: 100%;
+    height: 100%;
+    border: none;
+    outline: none;
+    background: transparent;
+    color: $text-color;
+    font-size: 15px;
+    line-height: 40px;
+    padding: 0 8px;
+
+    &::placeholder {
+      color: $text-secondary;
+    }
+
+    &:disabled {
+      opacity: 0.6;
+    }
+  }
+
+  &__hold {
+    width: 100%;
+    height: 100%;
+    border: none;
+    border-radius: 20px;
+    background: transparent;
+    color: $text-color;
+    font-size: 15px;
+    font-weight: 500;
+    letter-spacing: 1px;
+    cursor: pointer;
+    user-select: none;
+    touch-action: none;
+
+    &:disabled {
+      opacity: 0.45;
+      cursor: not-allowed;
+    }
+  }
+
+  &__composer.is-listening &__hold {
+    color: #fff;
+  }
+
+  &__send {
+    width: 40px;
+    height: 40px;
+    flex-shrink: 0;
+    border: none;
+    border-radius: 50%;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    background: transparent;
+    color: $text-secondary;
+    cursor: pointer;
+
+    &:hover:not(:disabled) {
+      color: $primary-color;
+      background: rgba(255, 90, 42, 0.12);
+    }
+
+    &:disabled {
+      opacity: 0.35;
       cursor: not-allowed;
     }
   }
