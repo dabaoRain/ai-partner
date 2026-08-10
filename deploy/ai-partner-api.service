@@ -1,0 +1,23 @@
+# AI-Partner FastAPI 后端 systemd 单元
+# 使用前请确认路径与用户名；安装示例：
+#   sudo cp deploy/ai-partner-api.service /etc/systemd/system/
+#   sudo systemctl daemon-reload
+#   sudo systemctl enable --now ai-partner-api
+
+[Unit]
+Description=AI Partner FastAPI backend
+After=network.target
+
+[Service]
+Type=simple
+User=www-data
+Group=www-data
+WorkingDirectory=/opt/ai-partner/back
+EnvironmentFile=/opt/ai-partner/back/.env
+ExecStart=/opt/ai-partner/back/.venv/bin/uvicorn main:app --host 127.0.0.1 --port 8000
+Restart=always
+RestartSec=3
+
+# 生产环境不启用 reload
+[Install]
+WantedBy=multi-user.target
