@@ -44,7 +44,7 @@
           <template v-else>
             <div v-if="msg.content">{{ msg.content }}</div>
             <div
-              v-if="msg.status === 'failed' && msg.errorMessage"
+              v-if="(msg.status === 'failed' || msg.status === 'cancelled') && msg.errorMessage"
               class="chat-panel__error"
             >
               {{ msg.errorMessage }}
@@ -58,6 +58,43 @@
             >
               重试
             </button>
+            <div
+              v-if="canFeedback(msg, index)"
+              class="chat-panel__feedback"
+            >
+              <button
+                type="button"
+                class="chat-panel__feedback-btn"
+                :class="{ 'is-active is-up': msg.feedback === 'up' }"
+                title="点赞"
+                aria-label="点赞"
+                :disabled="sending || Boolean(msg.feedback)"
+                @click="$emit('feedback', { index, rating: 'up' })"
+              >
+                <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true">
+                  <path
+                    fill="currentColor"
+                    d="M2 21h4V9H2v12zm20-11c0-1.1-.9-2-2-2h-6.31l.95-4.57.03-.32c0-.41-.17-.79-.44-1.06L13.17 1 6.59 7.59C6.22 7.95 6 8.45 6 9v10c0 1.1.9 2 2 2h9c.83 0 1.54-.5 1.84-1.22l3.02-7.05c.09-.23.14-.47.14-.73v-2z"
+                  />
+                </svg>
+              </button>
+              <button
+                type="button"
+                class="chat-panel__feedback-btn"
+                :class="{ 'is-active is-down': msg.feedback === 'down' }"
+                title="点踩"
+                aria-label="点踩"
+                :disabled="sending || Boolean(msg.feedback)"
+                @click="$emit('feedback', { index, rating: 'down' })"
+              >
+                <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true">
+                  <path
+                    fill="currentColor"
+                    d="M22 3h-4v12h4V3zM2 14c0 1.1.9 2 2 2h6.31l-.95 4.57-.03.32c0 .41.17.79.44 1.06L9.83 23l6.59-6.59c.36-.36.58-.86.58-1.41V5c0-1.1-.9-2-2-2H6c-.83 0-1.54.5-1.84 1.22L1.14 11.27c-.09.23-.14.47-.14.73v2z"
+                  />
+                </svg>
+              </button>
+            </div>
           </template>
         </div>
       </div>
@@ -165,7 +202,7 @@ const props = defineProps({
   },
 })
 
-const emit = defineEmits(['send', 'stop', 'retry'])
+const emit = defineEmits(['send', 'stop', 'retry', 'feedback'])
 const appStore = useAppStore()
 
 const draft = ref('')
@@ -215,6 +252,16 @@ function canRetry(msg, index) {
     msg.retryable &&
     (msg.status === 'failed' || msg.status === 'cancelled') &&
     index === props.messages.length - 1
+  )
+}
+
+/** 已完成的助手回复可反馈 */
+function canFeedback(msg, index) {
+  return (
+    msg.role === 'assistant' &&
+    msg.content &&
+    (!msg.status || msg.status === 'done' || msg.status === 'cancelled') &&
+    !msg.retryable
   )
 }
 
@@ -449,6 +496,62 @@ watch(
     &:disabled {
       opacity: 0.45;
       cursor: not-allowed;
+    }
+  }
+
+  &__feedback {
+    margin-top: 10px;
+    display: flex;
+    gap: 8px;
+  }
+
+  &__feedback-btn {
+    width: 32px;
+    height: 32px;
+    border: 1px solid $border-color;
+    border-radius: 50%;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    background: transparent;
+    color: $text-secondary;
+    cursor: pointer;
+    transition:
+      color 0.15s ease,
+      border-color 0.15s ease,
+      background 0.15s ease,
+      transform 0.15s ease;
+
+    &:hover:not(:disabled) {
+      color: $text-color;
+      border-color: rgba(255, 255, 255, 0.28);
+      background: rgba(255, 255, 255, 0.04);
+    }
+
+    &:active:not(:disabled) {
+      transform: scale(0.94);
+    }
+
+    &.is-active.is-up {
+      color: #fff;
+      border-color: transparent;
+      background: linear-gradient(135deg, #ff4d1a 0%, #ff8a4a 100%);
+    }
+
+    &.is-active.is-down {
+      color: #fff;
+      border-color: transparent;
+      background: rgba(231, 76, 60, 0.85);
+    }
+
+    &:disabled:not(.is-active) {
+      opacity: 0.4;
+      cursor: not-allowed;
+    }
+
+    &:disabled.is-active {
+      cursor: default;
+      opacity: 1;
     }
   }
 

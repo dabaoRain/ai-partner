@@ -25,12 +25,34 @@ export function fetchSessionDetail(sessionId) {
 
 /**
  * 新建会话（session_id 由后端生成）
- * @param {{ name: string, personality: string }} data
+ * @param {{
+ *   name: string,
+ *   identity?: string,
+ *   tone?: string,
+ *   interests?: string,
+ *   relationship_boundary?: string,
+ *   taboos?: string,
+ *   personality?: string,
+ *   persona_id?: string
+ * }} data
  */
 export function createSession(data) {
   return request({
     url: '/sessions',
     method: 'post',
+    data,
+  })
+}
+
+/**
+ * 空会话更换人设快照
+ * @param {string} sessionId
+ * @param {object} data
+ */
+export function updateSessionPersona(sessionId, data) {
+  return request({
+    url: `/sessions/${sessionId}/persona`,
+    method: 'put',
     data,
   })
 }
@@ -73,7 +95,12 @@ export async function stopChat(clientRequestId) {
  * @param {{
  *   message: string,
  *   name: string,
- *   personality: string,
+ *   identity?: string,
+ *   tone?: string,
+ *   interests?: string,
+ *   relationship_boundary?: string,
+ *   taboos?: string,
+ *   personality?: string,
  *   session_id: string,
  *   client_request_id: string,
  *   history?: Array<{role: string, content: string}>

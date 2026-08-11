@@ -33,32 +33,26 @@
       </ul>
     </div>
 
-    <div class="chat-sidebar__section">
-      <div class="chat-sidebar__label">名字</div>
-      <el-input
-        :model-value="name"
-        placeholder="请输入名字"
-        @update:model-value="$emit('update:name', $event)"
-      />
-    </div>
-
-    <div class="chat-sidebar__section chat-sidebar__section--grow">
-      <div class="chat-sidebar__label">性格</div>
-      <el-input
-        :model-value="personality"
-        type="textarea"
-        :rows="4"
-        resize="none"
-        placeholder="请输入性格设定"
-        @update:model-value="$emit('update:personality', $event)"
-      />
-    </div>
+    <button
+      class="chat-sidebar__persona-entry"
+      type="button"
+      @click="$emit('open-persona')"
+    >
+      <div class="chat-sidebar__persona-entry-main">
+        <div class="chat-sidebar__persona-entry-title">伴侣人设</div>
+        <div class="chat-sidebar__persona-entry-summary" :title="personaSummary">
+          {{ personaSummary }}
+        </div>
+      </div>
+      <el-icon :size="16"><ArrowRight /></el-icon>
+    </button>
 
     <!-- 登录用户：左下角头像与菜单；游客仅显示提示 -->
     <UserMenu
       v-if="isLoggedIn"
       :username="username"
       @logout="$emit('logout')"
+      @open-privacy="$emit('open-privacy')"
     />
     <div v-else class="chat-sidebar__guest-bar">
       <span>游客模式</span>
@@ -68,10 +62,11 @@
 </template>
 
 <script setup>
-import { EditPen, Document, CloseBold } from '@element-plus/icons-vue'
+import { computed } from 'vue'
+import { EditPen, Document, CloseBold, ArrowRight } from '@element-plus/icons-vue'
 import UserMenu from '@/components/chat/UserMenu.vue'
 
-defineProps({
+const props = defineProps({
   sessions: {
     type: Array,
     default: () => [],
@@ -80,11 +75,11 @@ defineProps({
     type: String,
     default: '',
   },
-  name: {
+  partnerName: {
     type: String,
     default: '',
   },
-  personality: {
+  identity: {
     type: String,
     default: '',
   },
@@ -102,11 +97,17 @@ defineEmits([
   'create',
   'select',
   'remove',
-  'update:name',
-  'update:personality',
+  'open-persona',
   'open-auth',
   'logout',
+  'open-privacy',
 ])
+
+const personaSummary = computed(() => {
+  const name = (props.partnerName || '').trim() || '未命名'
+  const identity = (props.identity || '').trim()
+  return identity ? `${name} · ${identity}` : name
+})
 </script>
 
 <style scoped lang="scss">
@@ -159,7 +160,7 @@ defineEmits([
     flex-direction: column;
     gap: 8px;
 
-    &--grow {
+    &--history {
       flex: 1;
       min-height: 0;
     }
@@ -174,7 +175,9 @@ defineEmits([
     display: flex;
     flex-direction: column;
     gap: 8px;
-    max-height: 220px;
+    max-height: none;
+    flex: 1;
+    min-height: 0;
     overflow: auto;
   }
 
@@ -236,6 +239,46 @@ defineEmits([
     }
   }
 
+  &__persona-entry {
+    flex-shrink: 0;
+    width: 100%;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 12px;
+    border: 1px solid $border-color;
+    border-radius: $radius-md;
+    background: $input-color;
+    color: $text-color;
+    cursor: pointer;
+    text-align: left;
+    transition: background 0.15s ease, border-color 0.15s ease;
+
+    &:hover {
+      background: #2a2e38;
+      border-color: #3a404c;
+    }
+  }
+
+  &__persona-entry-main {
+    flex: 1;
+    min-width: 0;
+  }
+
+  &__persona-entry-title {
+    font-size: 14px;
+    font-weight: 600;
+  }
+
+  &__persona-entry-summary {
+    margin-top: 4px;
+    font-size: 12px;
+    color: $text-secondary;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
   &__guest-bar {
     flex-shrink: 0;
     margin-top: auto;
@@ -275,17 +318,6 @@ defineEmits([
 
     &.is-open {
       transform: translateX(0);
-    }
-
-    &__section--history {
-      flex: 1;
-      min-height: 0;
-    }
-
-    &__history {
-      flex: 1;
-      min-height: 0;
-      max-height: none;
     }
   }
 }

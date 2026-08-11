@@ -50,6 +50,11 @@ SESSION_BUSY = ChatError(
     "当前会话正在生成，请稍后再试或先停止",
     False,
 )
+PERSONA_LOCKED = ChatError(
+    "PERSONA_LOCKED",
+    "当前会话人设已锁定，请新建会话后再更换人设",
+    False,
+)
 DUPLICATE_IN_FLIGHT = ChatError(
     "DUPLICATE_IN_FLIGHT",
     "相同请求正在处理中",

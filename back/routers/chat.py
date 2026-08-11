@@ -12,12 +12,14 @@ from fastapi.responses import StreamingResponse
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from analytics import track_event
 from auth.deps import get_principal
 from auth.tokens import Principal
 from chat_errors import (
     CLIENT_CANCELLED,
     DUPLICATE_IN_FLIGHT,
     FIRST_TOKEN_TIMEOUT,
+    PERSONA_LOCKED,
     SESSION_BUSY,
     STREAM_INTERRUPTED,
     STREAM_TIMEOUT,
@@ -45,11 +47,60 @@ from llm import (
     build_system_prompt,
     create_chat_stream,
 )
-from models import ChatRequestLog
+from models import AnalyticsEvent, ChatRequestLog
+from persona_service import persona_snapshot, personas_equal
 from schemas import ChatRequest, StopChatRequest
 from session_service import assert_session_owner, save_session_turn
 
 router = APIRouter(tags=["chat"])
+
+
+def _track_chat(
+    event_name: str,
+    *,
+    owner_type: str,
+    owner_id: str,
+    session_id: str,
+    props: dict | None = None,
+) -> None:
+    db = SessionLocal()
+    try:
+        track_event(
+            db,
+            event_name,
+            owner_type=owner_type,
+            owner_id=owner_id,
+            session_id=session_id,
+            props=props or {},
+        )
+    finally:
+        db.close()
+
+
+def _maybe_track_first_chat(owner_type: str, owner_id: str, session_id: str) -> None:
+    """若该主体此前无 chat_completed，则记 first_chat。"""
+    db = SessionLocal()
+    try:
+        exists = db.scalars(
+            select(AnalyticsEvent.id)
+            .where(
+                AnalyticsEvent.event_name == "first_chat",
+                AnalyticsEvent.owner_type == owner_type,
+                AnalyticsEvent.owner_id == owner_id,
+            )
+            .limit(1)
+        ).first()
+        if exists:
+            return
+        track_event(
+            db,
+            "first_chat",
+            owner_type=owner_type,
+            owner_id=owner_id,
+            session_id=session_id,
+        )
+    finally:
+        db.close()
 
 
 def _sse(payload: dict | str) -> str:
@@ -129,7 +180,26 @@ def chat(
             detail="未配置 DEEPSEEK_API_KEY，请在 back/.env 中设置或 export 后再启动",
         )
 
-    assert_session_owner(db, principal, payload.session_id)
+    session_row = assert_session_owner(db, principal, payload.session_id)
+    locked_persona = persona_snapshot(session_row)
+    request_persona = {
+        "name": payload.name,
+        "personality": payload.personality,
+        "region": payload.region,
+        "metaphor": payload.metaphor,
+        "age": payload.age,
+        "identity": payload.identity,
+        "tone": payload.tone,
+        "catchphrases": payload.catchphrases,
+        "interests": payload.interests,
+        "intimacy_stages": payload.intimacy_stages,
+        "relationship_boundary": payload.relationship_boundary,
+        "taboos": payload.taboos,
+        "openings": payload.openings,
+        "easter_eggs": payload.easter_eggs,
+    }
+    if not personas_equal(locked_persona, request_persona):
+        raise HTTPException(status_code=409, detail=PERSONA_LOCKED.as_dict())
 
     existing = db.scalars(
         select(ChatRequestLog).where(
@@ -193,9 +263,24 @@ def chat(
     messages = [
         {
             "role": "system",
-            "content": build_system_prompt(payload.name, payload.personality),
+            "content": build_system_prompt(
+                locked_persona["name"],
+                locked_persona["personality"],
+                identity=locked_persona["identity"],
+                tone=locked_persona["tone"],
+                interests=locked_persona["interests"],
+                relationship_boundary=locked_persona["relationship_boundary"],
+                taboos=locked_persona["taboos"],
+                region=locked_persona["region"],
+                metaphor=locked_persona["metaphor"],
+                age=locked_persona.get("age") or 0,
+                catchphrases=locked_persona["catchphrases"],
+                intimacy_stages=locked_persona["intimacy_stages"],
+                openings=locked_persona["openings"],
+                easter_eggs=locked_persona["easter_eggs"],
+            ),
         },
-        *[item.model_dump() for item in payload.history],
+        *[{"role": item.role, "content": item.content} for item in payload.history],
         {"role": "user", "content": payload.message},
     ]
 
@@ -210,7 +295,9 @@ def chat(
         _update_log(payload.client_request_id, status="failed", error=err)
         raise HTTPException(status_code=502, detail=err.as_dict()) from exc
     except APIError as exc:
-        err = ChatError(UPSTREAM_ERROR.code, f"{UPSTREAM_ERROR.message}: {exc.message}", True)
+        err = ChatError(
+            UPSTREAM_ERROR.code, f"{UPSTREAM_ERROR.message}: {exc.message}", True
+        )
         _update_log(payload.client_request_id, status="failed", error=err)
         raise HTTPException(status_code=502, detail=err.as_dict()) from exc
     except Exception as exc:
@@ -232,6 +319,13 @@ def chat(
     )
     register_job(job)
     _update_log(payload.client_request_id, status="streaming")
+    _track_chat(
+        "chat_message",
+        owner_type=principal.typ,
+        owner_id=principal.id,
+        session_id=payload.session_id,
+        props={"client_request_id": payload.client_request_id},
+    )
 
     def event_generator():
         full_parts: list[str] = []
@@ -255,7 +349,10 @@ def chat(
                     break
 
                 now = time.monotonic()
-                if not got_first_token and (now - started) > CHAT_FIRST_TOKEN_TIMEOUT_SEC:
+                if (
+                    not got_first_token
+                    and (now - started) > CHAT_FIRST_TOKEN_TIMEOUT_SEC
+                ):
                     terminal_error = FIRST_TOKEN_TIMEOUT
                     break
                 if (now - started) > CHAT_STREAM_TIMEOUT_SEC:
@@ -285,8 +382,6 @@ def chat(
                         save_session_turn(
                             db=save_db,
                             session_id=payload.session_id,
-                            name=payload.name,
-                            personality=payload.personality,
                             question=payload.message,
                             answer=answer,
                         )
@@ -298,12 +393,27 @@ def chat(
                         answer=answer,
                         error=terminal_error,
                     )
+                    _track_chat(
+                        "chat_cancelled",
+                        owner_type=principal.typ,
+                        owner_id=principal.id,
+                        session_id=payload.session_id,
+                        props={"partial": True, "code": terminal_error.code},
+                    )
                 else:
+                    status_name = "cancelled" if cancelled else "failed"
                     _update_log(
                         payload.client_request_id,
-                        status="cancelled" if cancelled else "failed",
+                        status=status_name,
                         answer=answer,
                         error=terminal_error,
+                    )
+                    _track_chat(
+                        "chat_cancelled" if cancelled else "chat_failed",
+                        owner_type=principal.typ,
+                        owner_id=principal.id,
+                        session_id=payload.session_id,
+                        props={"code": terminal_error.code},
                     )
                 yield _sse_error(terminal_error)
                 return
@@ -313,8 +423,6 @@ def chat(
                 save_session_turn(
                     db=save_db,
                     session_id=payload.session_id,
-                    name=payload.name,
-                    personality=payload.personality,
                     question=payload.message,
                     answer=answer,
                 )
@@ -326,6 +434,14 @@ def chat(
                 status="completed",
                 answer=answer,
             )
+            _track_chat(
+                "chat_completed",
+                owner_type=principal.typ,
+                owner_id=principal.id,
+                session_id=payload.session_id,
+                props={"client_request_id": payload.client_request_id},
+            )
+            _maybe_track_first_chat(principal.typ, principal.id, payload.session_id)
             yield _sse("[DONE]")
         except Exception as exc:
             traceback.print_exc()
@@ -339,6 +455,13 @@ def chat(
                 status="failed",
                 answer="".join(full_parts),
                 error=err,
+            )
+            _track_chat(
+                "chat_failed",
+                owner_type=principal.typ,
+                owner_id=principal.id,
+                session_id=payload.session_id,
+                props={"code": err.code},
             )
             yield _sse_error(err)
         finally:

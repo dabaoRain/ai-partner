@@ -45,3 +45,9 @@ CHAT_STREAM_TIMEOUT_SEC = int(os.environ.get("CHAT_STREAM_TIMEOUT_SEC", "180"))
 # 上游 HTTP 超时与建连失败重试次数
 CHAT_UPSTREAM_TIMEOUT_SEC = float(os.environ.get("CHAT_UPSTREAM_TIMEOUT_SEC", "120"))
 CHAT_UPSTREAM_MAX_RETRIES = int(os.environ.get("CHAT_UPSTREAM_MAX_RETRIES", "3"))
+
+# 数据保留（天）；0 表示不自动清理该类
+DATA_RETENTION_DAYS_GUEST = int(os.environ.get("DATA_RETENTION_DAYS_GUEST", "30"))
+DATA_RETENTION_DAYS_CHAT_REQUEST_LOG = int(
+    os.environ.get("DATA_RETENTION_DAYS_CHAT_REQUEST_LOG", "90")
+)

@@ -15,8 +15,8 @@
       @click="appStore.closeSidebar()"
     />
     <ChatSidebar
-      v-model:name="partnerName"
-      v-model:personality="personality"
+      :partner-name="partnerName"
+      :identity="identity"
       :sessions="sessions"
       :active-id="activeSessionId"
       :is-logged-in="userStore.isLoggedIn"
@@ -25,8 +25,10 @@
       @create="handleCreate"
       @select="handleSelect"
       @remove="removeSession"
+      @open-persona="personaVisible = true"
       @open-auth="backToAuthGate"
       @logout="handleLogout"
+      @open-privacy="privacyVisible = true"
     />
     <ChatPanel
       :session-id="activeSessionId"
@@ -35,6 +37,16 @@
       @send="sendMessage"
       @stop="stopGeneration"
       @retry="retryMessage"
+      @feedback="handleFeedback"
+    />
+    <PersonaSettingsDialog
+      v-model="personaVisible"
+      :persona-id="activePersonaId"
+      @apply="onPersonaApply"
+    />
+    <PrivacySettingsDialog
+      v-model="privacyVisible"
+      @deleted="handleAccountDeleted"
     />
   </div>
 </template>
@@ -45,11 +57,14 @@ import { ElMessage, ElMessageBox } from "element-plus";
 import ChatSidebar from "@/components/chat/ChatSidebar.vue";
 import ChatPanel from "@/components/chat/ChatPanel.vue";
 import AuthGate from "@/components/chat/AuthGate.vue";
+import PersonaSettingsDialog from "@/components/chat/PersonaSettingsDialog.vue";
+import PrivacySettingsDialog from "@/components/chat/PrivacySettingsDialog.vue";
 import { useAppStore } from "@/store/app";
 import { useUserStore } from "@/store";
 import { useWindowSize } from "@/composables/useWindowSize";
 import { ensureAuthReady } from "@/utils/authBootstrap";
 import { claimGuest, logout as logoutApi } from "@/api/auth";
+import { postFeedback, trackClientEvent } from "@/api/analytics";
 import { ChatStreamError } from "@/utils/chatError";
 import {
   createSession as createSessionApi,
@@ -58,14 +73,115 @@ import {
   fetchSessions,
   sendChatStream,
   stopChat,
+  updateSessionPersona,
 } from "@/api/chat";
+import request from "@/utils/request";
+
+import { fetchDefaultPersona } from "@/api/persona";
+import {
+  normalizePersona,
+  personasEqual,
+} from "@/constants/personaPresets";
 
 const appStore = useAppStore();
 const userStore = useUserStore();
 const { isMobile } = useWindowSize();
 
-const partnerName = ref("小美");
-const personality = ref("温柔可爱一口台湾腔的台湾妹子");
+/** 工作区当前人设（来自官方库或会话快照） */
+const workspacePersona = ref(normalizePersona({ name: "加载中" }));
+const partnerName = computed(() => workspacePersona.value.name || "");
+const identity = computed(() => workspacePersona.value.identity || "");
+/** 当前选用的官方人设 id */
+const activePersonaId = ref("");
+/** 当前会话锁定的人设快照（用于检测变更） */
+const sessionPersonaSnapshot = ref(null);
+
+/** 当前工作区人设，供创建会话与发消息共用 */
+function currentPersona() {
+  return normalizePersona(workspacePersona.value);
+}
+
+function applyPersona(detail, personaId = "") {
+  if (!detail) return;
+  workspacePersona.value = normalizePersona(detail);
+  if (personaId !== undefined && personaId !== null) {
+    activePersonaId.value = personaId || "";
+  }
+}
+
+async function ensureDefaultPersona() {
+  if (activePersonaId.value && workspacePersona.value.name !== "加载中") {
+    return;
+  }
+  const detail = await fetchDefaultPersona();
+  applyPersona(detail, detail.id);
+}
+
+async function onPersonaApply({ id, persona }) {
+  const next = normalizePersona(persona);
+  const locked = sessionPersonaSnapshot.value;
+  const hasSession = Boolean(activeSessionId.value);
+  const current = sessions.value.find(
+    (item) => item.id === activeSessionId.value,
+  );
+  const isEmptySession = Boolean(
+    current && !current.messages.some((msg) => msg.role === "user"),
+  );
+
+  // 与当前会话锁定人设一致：只更新工作区引用
+  if (hasSession && locked && personasEqual(next, locked)) {
+    applyPersona(next, id);
+    ElMessage.success("人设已应用到当前会话");
+    return;
+  }
+
+  // 空会话：直接改快照，无需新建
+  if (hasSession && isEmptySession && (!locked || !personasEqual(next, locked))) {
+    const detail = await updateSessionPersona(activeSessionId.value, {
+      persona_id: id,
+    });
+    applyPersona(detail, detail.persona_id || id);
+    sessionPersonaSnapshot.value = normalizePersona(detail);
+    const item = sessions.value.find((s) => s.id === activeSessionId.value);
+    if (item) {
+      item.name = detail.name || item.name;
+      item.identity = detail.identity || "";
+      item.tone = detail.tone || "";
+      item.personaId = detail.persona_id || id || "";
+      item.messages = detail.messages || [];
+    }
+    ElMessage.success("人设已更新到当前会话");
+    return;
+  }
+
+  // 已有问答：必须新建会话
+  if (hasSession && locked && !personasEqual(next, locked)) {
+    try {
+      await ElMessageBox.confirm(
+        `当前会话已绑定人设「${locked.name || "未命名"}」，更换人设需要新建会话。是否继续？`,
+        "更换人设",
+        {
+          type: "warning",
+          confirmButtonText: "新建会话",
+          cancelButtonText: "取消",
+          customClass: "persona-switch-box",
+          appendTo: document.body,
+          center: false,
+        },
+      );
+    } catch {
+      return;
+    }
+    applyPersona(next, id);
+    await createSession({ force: true, personaId: id });
+    ElMessage.success("已用人设新建会话");
+    return;
+  }
+
+  // 无会话：应用并等待用户发消息时自动建会话
+  applyPersona(next, id);
+  ElMessage.success("人设已应用，发送消息或新建会话后生效");
+}
 
 const sessions = ref([]);
 const activeSessionId = ref("");
@@ -73,6 +189,8 @@ const sending = ref(false);
 /** 是否已进入聊天主界面（已登录用户启动时直接为 true） */
 const appReady = ref(false);
 const bootstrapping = ref(true);
+const privacyVisible = ref(false);
+const personaVisible = ref(false);
 
 /** 当前进行中的流式请求控制 */
 const activeAbort = ref(null);
@@ -102,7 +220,10 @@ function mapSessionItem(item, messages = []) {
   return {
     id: item.session_id,
     name: item.name || "",
+    identity: item.identity || "",
+    tone: item.tone || "",
     personality: item.personality || "",
+    personaId: item.persona_id || "",
     messages,
   };
 }
@@ -126,33 +247,49 @@ async function loadSessions() {
 }
 
 async function enterChatWorkspace() {
+  await ensureDefaultPersona();
   await loadSessions();
   appReady.value = true;
+  trackClientEvent("app_open", {
+    props: { logged_in: userStore.isLoggedIn },
+  });
   if (!activeSessionId.value && sessions.value.length) {
     await selectSession(sessions.value[0].id);
+  } else if (!sessions.value.length) {
+    // 无历史会话时自动建一个，并展示人设开场白
+    await createSession({ force: true });
   }
 }
 
-async function createSession() {
-  if (activeSessionId.value) {
+async function createSession(options = {}) {
+  const force = Boolean(options.force);
+  const personaId = options.personaId || activePersonaId.value || "";
+
+  if (!force && activeSessionId.value) {
     const current = sessions.value.find(
       (item) => item.id === activeSessionId.value,
     );
-    if (current && current.messages.length === 0) {
+    if (current && !current.messages.some((msg) => msg.role === "user")) {
       ElMessage.info("当前会话还没有问答，无需新建");
       return activeSessionId.value;
     }
   }
 
-  const res = await createSessionApi({
-    name: partnerName.value,
-    personality: personality.value,
-  });
+  const payload = {};
+  if (personaId) {
+    payload.persona_id = personaId;
+  }
+
+  const res = await createSessionApi(payload);
   await loadSessions();
   activeSessionId.value = res.session_id;
+
+  const detail = await fetchSessionDetail(res.session_id);
+  applyPersona(detail, detail.persona_id || personaId);
+  sessionPersonaSnapshot.value = normalizePersona(detail);
   const created = sessions.value.find((item) => item.id === res.session_id);
   if (created) {
-    created.messages = [];
+    created.messages = detail.messages || [];
   }
   return res.session_id;
 }
@@ -171,8 +308,8 @@ async function selectSession(id) {
   }
   activeSessionId.value = id;
   const detail = await fetchSessionDetail(id);
-  partnerName.value = detail.name || partnerName.value;
-  personality.value = detail.personality || personality.value;
+  applyPersona(detail, detail.persona_id || "");
+  sessionPersonaSnapshot.value = normalizePersona(detail);
 
   let current = sessions.value.find((item) => item.id === id);
   if (!current) {
@@ -196,18 +333,34 @@ async function removeSession(id) {
     ElMessage.info("正在回复中，请稍后再删除会话");
     return;
   }
-  const isActive = activeSessionId.value === id;
-  await deleteSession(id);
 
-  if (isActive) {
-    activeSessionId.value = "";
+  const list = sessions.value;
+  const idx = list.findIndex((item) => item.id === id);
+  const isActive = activeSessionId.value === id;
+  // 删除前确定「下一个」：优先同列表下一项，否则上一项
+  let nextId = "";
+  if (isActive && idx >= 0) {
+    const neighbor = list[idx + 1] || list[idx - 1];
+    nextId = neighbor?.id || "";
   }
 
+  await deleteSession(id);
   await loadSessions();
 
-  if (isActive && !sessions.value.length) {
-    ElMessage.info("暂无会话，可点击「新建会话」开始");
+  if (!isActive) return;
+
+  if (nextId && sessions.value.some((item) => item.id === nextId)) {
+    await selectSession(nextId);
+    return;
   }
+  if (sessions.value.length) {
+    await selectSession(sessions.value[0].id);
+    return;
+  }
+
+  activeSessionId.value = "";
+  sessionPersonaSnapshot.value = null;
+  ElMessage.info("暂无会话，可点击「新建会话」开始");
 }
 
 function newClientRequestId() {
@@ -279,8 +432,7 @@ async function sendMessage(text, options = {}) {
     await sendChatStream(
       {
         message: text,
-        name: partnerName.value,
-        personality: personality.value,
+        ...currentPersona(),
         session_id: activeSessionId.value,
         history,
         client_request_id: clientRequestId,
@@ -359,37 +511,75 @@ async function retryMessage(assistantIndex) {
   await sendMessage(text, { reuseUser: true });
 }
 
+async function handleFeedback({ index, rating }) {
+  const current = sessions.value.find(
+    (item) => item.id === activeSessionId.value,
+  );
+  if (!current || !activeSessionId.value) return;
+  const msg = current.messages[index];
+  if (!msg || msg.role !== "assistant") return;
+
+  try {
+    await postFeedback({
+      session_id: activeSessionId.value,
+      message_key: `${activeSessionId.value}:${index}`,
+      rating,
+      reason: "",
+    });
+    msg.feedback = rating;
+    ElMessage.success(rating === "up" ? "已点赞" : "已点踩");
+  } catch (error) {
+    console.error(error);
+  }
+}
+
+function handleAccountDeleted() {
+  userStore.logout();
+  activeSessionId.value = "";
+  sessions.value = [];
+  appReady.value = false;
+  privacyVisible.value = false;
+}
+
 async function enterChatAsGuest() {
   await enterChatWorkspace();
 }
 
-/** 切换登录态前，用当前 guest 凭证统计是否有可合并会话 */
+/** 用指定 guest 凭证统计可合并会话数（不依赖当前登录态） */
 async function countGuestSessions(guestToken) {
   if (!guestToken) return 0;
+  // 仍在游客工作区时，直接用本地列表，避免多余请求
   if (sessions.value.length > 0 && !userStore.accessToken) {
     return sessions.value.length;
   }
   try {
-    // 此时尚未写入用户 token，interceptor 会带上 guest
-    const list = await fetchSessions();
+    const list = await request({
+      url: "/sessions",
+      method: "get",
+      headers: { Authorization: `Bearer ${guestToken}` },
+      silent: true,
+    });
     return (list || []).length;
   } catch {
+    // guest 已失效：清掉，避免登录后误带旧凭证
+    userStore.setGuestToken("");
     return 0;
   }
 }
 
 /**
- * 登录/注册成功：写入凭证，按需合并匿名数据后进入聊天。
+ * 登录/注册成功：先写入用户凭证，再按需合并匿名数据后进入聊天。
  */
 async function onAuthSuccess(res) {
   const guestToken = userStore.guestToken;
-  const guestSessionCount = await countGuestSessions(guestToken);
 
   userStore.setAuthTokens({
     access_token: res.access_token,
     refresh_token: res.refresh_token,
     user: res.user,
   });
+
+  const guestSessionCount = await countGuestSessions(guestToken);
 
   if (guestToken && guestSessionCount > 0) {
     try {
@@ -401,6 +591,7 @@ async function onAuthSuccess(res) {
           cancelButtonText: "暂不合并",
           type: "warning",
           distinguishCancelAndClose: true,
+          customClass: "persona-switch-box",
         },
       );
       const claimRes = await claimGuest({

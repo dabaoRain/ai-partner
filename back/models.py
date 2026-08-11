@@ -61,6 +61,38 @@ class AuthSession(Base):
     user: Mapped[User] = relationship(back_populates="auth_sessions")
 
 
+class Persona(Base):
+    """官方人设库（只读）：由 persona/index.md 种子写入。"""
+
+    __tablename__ = "personas"
+
+    # 官方稳定 id，如 official_ne_zhaoyining
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    region: Mapped[str] = mapped_column(String(64), default="")
+    metaphor: Mapped[str] = mapped_column(String(64), default="")
+    status: Mapped[str] = mapped_column(String(20), default="active", index=True)
+    sort_order: Mapped[int] = mapped_column(Integer, default=0, index=True)
+    name: Mapped[str] = mapped_column(String(100))
+    # 人设年龄（岁），官方库约定 25～28
+    age: Mapped[int] = mapped_column(Integer, default=0)
+    identity: Mapped[str] = mapped_column(Text, default="")
+    tone: Mapped[str] = mapped_column(Text, default="")
+    # JSON 数组字符串
+    catchphrases: Mapped[str] = mapped_column(Text, default="[]")
+    interests: Mapped[str] = mapped_column(Text, default="")
+    # JSON 数组：[{title, period, description}]
+    intimacy_stages: Mapped[str] = mapped_column(Text, default="[]")
+    relationship_boundary: Mapped[str] = mapped_column(Text, default="")
+    taboos: Mapped[str] = mapped_column(Text, default="")
+    personality: Mapped[str] = mapped_column(Text, default="")
+    # JSON 数组字符串
+    openings: Mapped[str] = mapped_column(Text, default="[]")
+    # JSON 数组：[{trigger, response}]
+    easter_eggs: Mapped[str] = mapped_column(Text, default="[]")
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=_now)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=_now, onupdate=_now)
+
+
 class ChatSession(Base):
     """聊天会话，归属 guest 或 user。"""
 
@@ -72,8 +104,25 @@ class ChatSession(Base):
     id: Mapped[str] = mapped_column(String(32), primary_key=True)
     owner_type: Mapped[str] = mapped_column(String(10), index=True)  # guest | user
     owner_id: Mapped[str] = mapped_column(String(36), index=True)
+    # 选用的官方人设 id；会话内快照不可改
+    persona_id: Mapped[str | None] = mapped_column(
+        String(64), ForeignKey("personas.id", ondelete="SET NULL"), nullable=True
+    )
     name: Mapped[str] = mapped_column(String(100))
     personality: Mapped[str] = mapped_column(Text)
+    # 结构化人设（会话锁定快照，与官方库字段对齐）
+    region: Mapped[str] = mapped_column(String(64), default="")
+    metaphor: Mapped[str] = mapped_column(String(64), default="")
+    age: Mapped[int] = mapped_column(Integer, default=0)
+    identity: Mapped[str] = mapped_column(Text, default="")
+    tone: Mapped[str] = mapped_column(Text, default="")
+    catchphrases: Mapped[str] = mapped_column(Text, default="[]")
+    interests: Mapped[str] = mapped_column(Text, default="")
+    intimacy_stages: Mapped[str] = mapped_column(Text, default="[]")
+    relationship_boundary: Mapped[str] = mapped_column(Text, default="")
+    taboos: Mapped[str] = mapped_column(Text, default="")
+    openings: Mapped[str] = mapped_column(Text, default="[]")
+    easter_eggs: Mapped[str] = mapped_column(Text, default="[]")
     created_at: Mapped[datetime] = mapped_column(DateTime, default=_now)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=_now, onupdate=_now)
 
@@ -131,3 +180,60 @@ class ChatRequestLog(Base):
     error_message: Mapped[str] = mapped_column(Text, default="")
     created_at: Mapped[datetime] = mapped_column(DateTime, default=_now)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=_now, onupdate=_now)
+
+
+class UserPreference(Base):
+    """用户偏好；记忆开关仅预留存储。"""
+
+    __tablename__ = "user_preferences"
+
+    user_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("users.id", ondelete="CASCADE"), primary_key=True
+    )
+    memory_enabled: Mapped[int] = mapped_column(Integer, default=0)  # 0/1
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=_now, onupdate=_now)
+
+
+class PermissionLog(Base):
+    """权限/同意操作审计。"""
+
+    __tablename__ = "permission_logs"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    owner_type: Mapped[str] = mapped_column(String(10), index=True)  # user | guest | system
+    owner_id: Mapped[str] = mapped_column(String(36), index=True)
+    # privacy_policy | memory_toggle | account_delete | analytics_opt_in | claim_guest
+    purpose: Mapped[str] = mapped_column(String(64), index=True)
+    action: Mapped[str] = mapped_column(String(32))  # grant | revoke | view
+    detail: Mapped[str] = mapped_column(Text, default="")
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=_now)
+
+
+class AnalyticsEvent(Base):
+    """产品埋点事件。"""
+
+    __tablename__ = "analytics_events"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    event_name: Mapped[str] = mapped_column(String(64), index=True)
+    owner_type: Mapped[str] = mapped_column(String(10), default="", index=True)
+    owner_id: Mapped[str] = mapped_column(String(36), default="", index=True)
+    session_id: Mapped[str] = mapped_column(String(32), default="", index=True)
+    props_json: Mapped[str] = mapped_column(Text, default="{}")
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=_now, index=True)
+
+
+class MessageFeedback(Base):
+    """消息反馈（点赞/点踩）。"""
+
+    __tablename__ = "message_feedbacks"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    owner_type: Mapped[str] = mapped_column(String(10), index=True)
+    owner_id: Mapped[str] = mapped_column(String(36), index=True)
+    session_id: Mapped[str] = mapped_column(String(32), index=True)
+    # 助手消息在会话中的序号（0-based messages 列表下标）或其他客户端键
+    message_key: Mapped[str] = mapped_column(String(64), index=True)
+    rating: Mapped[str] = mapped_column(String(16))  # up | down
+    reason: Mapped[str] = mapped_column(Text, default="")
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=_now)

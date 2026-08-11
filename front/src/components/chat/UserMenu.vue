@@ -16,7 +16,11 @@
       </button>
       <template #dropdown>
         <el-dropdown-menu>
-          <el-dropdown-item command="logout" class="user-menu__logout-item">
+          <el-dropdown-item command="privacy">
+            <el-icon :size="16"><Setting /></el-icon>
+            <span>隐私与账号</span>
+          </el-dropdown-item>
+          <el-dropdown-item command="logout" class="user-menu__logout-item" divided>
             <el-icon :size="16"><SwitchButton /></el-icon>
             <span>退出登录</span>
           </el-dropdown-item>
@@ -28,7 +32,7 @@
 
 <script setup>
 import { computed } from 'vue'
-import { ArrowUp, SwitchButton } from '@element-plus/icons-vue'
+import { ArrowUp, SwitchButton, Setting } from '@element-plus/icons-vue'
 
 const props = defineProps({
   username: {
@@ -37,7 +41,7 @@ const props = defineProps({
   },
 })
 
-const emit = defineEmits(['logout'])
+const emit = defineEmits(['logout', 'open-privacy'])
 
 const avatarText = computed(() => {
   const name = (props.username || '?').trim()
@@ -47,6 +51,8 @@ const avatarText = computed(() => {
 function onCommand(command) {
   if (command === 'logout') {
     emit('logout')
+  } else if (command === 'privacy') {
+    emit('open-privacy')
   }
 }
 </script>
@@ -132,13 +138,17 @@ function onCommand(command) {
   }
 
   .el-dropdown-menu__item {
-    color: #ff8b80;
+    color: #f3f4f6;
     gap: 8px;
 
     &:hover {
       background: rgba(255, 255, 255, 0.06);
-      color: #ff8b80;
+      color: #fff;
     }
+  }
+
+  .user-menu__logout-item {
+    color: #ff8b80 !important;
   }
 
   .el-popper__arrow::before {

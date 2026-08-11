@@ -5,6 +5,7 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
+from analytics import track_event
 from auth.deps import get_principal
 from auth.tokens import Principal
 from db import get_db
@@ -13,12 +14,14 @@ from schemas import (
     CreateSessionResponse,
     SessionDetailResponse,
     SessionListItem,
+    UpdateSessionPersonaRequest,
 )
 from session_service import (
     create_session,
     delete_session,
     get_session_detail,
     list_sessions,
+    update_session_persona,
 )
 
 router = APIRouter(tags=["sessions"])
@@ -51,7 +54,30 @@ def api_delete_session(
 ):
     """删除会话。"""
     delete_session(db, principal, session_id)
+    track_event(
+        db,
+        "session_deleted",
+        owner_type=principal.typ,
+        owner_id=principal.id,
+        session_id=session_id,
+    )
     return {"ok": True}
+
+
+@router.put("/sessions/{session_id}/persona", response_model=SessionDetailResponse)
+def api_update_session_persona(
+    session_id: str,
+    payload: UpdateSessionPersonaRequest,
+    principal: Annotated[Principal, Depends(get_principal)],
+    db: Annotated[Session, Depends(get_db)],
+):
+    """空会话更换人设；已有问答则 409。"""
+    return update_session_persona(
+        db,
+        principal,
+        session_id,
+        persona_id=payload.persona_id,
+    )
 
 
 @router.post("/sessions", response_model=CreateSessionResponse)
@@ -62,8 +88,19 @@ def api_create_session(
 ):
     """新建会话并写入归属。"""
     try:
-        session_id = create_session(db, principal, payload.name, payload.personality)
+        session_id = create_session(
+            db,
+            principal,
+            persona_id=payload.persona_id,
+        )
     except Exception as exc:
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=f"创建会话失败: {exc}") from exc
+    track_event(
+        db,
+        "session_created",
+        owner_type=principal.typ,
+        owner_id=principal.id,
+        session_id=session_id,
+    )
     return CreateSessionResponse(session_id=session_id)

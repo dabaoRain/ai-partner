@@ -51,6 +51,22 @@
           />
         </label>
 
+        <label v-if="mode === 'register'" class="auth-gate__consent">
+          <el-checkbox v-model="privacyAccepted" />
+          <span>
+            我已阅读并同意
+            <button type="button" class="auth-gate__link" @click.stop.prevent="showPolicy = true">
+              《隐私说明》
+            </button>
+            （收集目的、会话数据与注销权利）
+          </span>
+        </label>
+
+        <p v-else class="auth-gate__hint">
+          继续即表示了解我们会处理账号与会话数据，详见
+          <button type="button" class="auth-gate__link" @click="showPolicy = true">隐私说明</button>
+        </p>
+
         <el-button
           class="auth-gate__submit"
           type="primary"
@@ -74,15 +90,28 @@
       >
         {{ guestLoading ? '正在进入…' : '游客登录，先体验一下' }}
       </button>
+      <p class="auth-gate__guest-hint">
+        游客模式仅在本机保存会话归属；可随时登录并明确授权后合并。
+      </p>
     </div>
+
+    <el-dialog v-model="showPolicy" title="隐私说明" width="480px" append-to-body>
+      <div v-if="policy" class="auth-gate__policy">
+        <p v-for="(item, idx) in policy.collection_purposes" :key="idx">{{ item }}</p>
+        <h4>保留策略</h4>
+        <p v-for="(val, key) in policy.retention" :key="key">{{ key }}：{{ val }}</p>
+      </div>
+      <el-skeleton v-else animated :rows="4" />
+    </el-dialog>
   </div>
 </template>
 
 <script setup>
-import { ref } from 'vue'
+import { onMounted, ref } from 'vue'
 import { ElMessage } from 'element-plus'
 import { login, register } from '@/api/auth'
 import { ensureAuthReady } from '@/utils/authBootstrap'
+import { fetchPrivacyPolicy } from '@/api/privacy'
 
 const emit = defineEmits(['success', 'guest'])
 
@@ -91,6 +120,17 @@ const username = ref('')
 const password = ref('')
 const loading = ref(false)
 const guestLoading = ref(false)
+const privacyAccepted = ref(false)
+const showPolicy = ref(false)
+const policy = ref(null)
+
+onMounted(async () => {
+  try {
+    policy.value = await fetchPrivacyPolicy()
+  } catch (error) {
+    console.error(error)
+  }
+})
 
 async function submit() {
   const name = username.value.trim()
@@ -103,10 +143,18 @@ async function submit() {
     ElMessage.warning('密码至少 8 位')
     return
   }
+  if (mode.value === 'register' && !privacyAccepted.value) {
+    ElMessage.warning('请先阅读并同意隐私说明')
+    return
+  }
   loading.value = true
   try {
     const api = mode.value === 'login' ? login : register
-    const res = await api({ username: name, password: pwd })
+    const body =
+      mode.value === 'register'
+        ? { username: name, password: pwd, privacy_accepted: true }
+        : { username: name, password: pwd }
+    const res = await api(body)
     emit('success', res)
   } catch (error) {
     console.error(error)
@@ -312,6 +360,58 @@ async function enterAsGuest() {
   &:disabled {
     opacity: 0.6;
     cursor: not-allowed;
+  }
+}
+
+.auth-gate__consent {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  font-size: 12px;
+  line-height: 1.5;
+  color: $text-secondary;
+}
+
+.auth-gate__hint,
+.auth-gate__guest-hint {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.5;
+  color: $text-secondary;
+}
+
+.auth-gate__guest-hint {
+  margin-top: 10px;
+  text-align: center;
+}
+
+.auth-gate__link {
+  border: none;
+  padding: 0;
+  background: transparent;
+  color: $primary-soft;
+  cursor: pointer;
+  font-size: inherit;
+
+  &:hover {
+    text-decoration: underline;
+  }
+}
+
+.auth-gate__policy {
+  color: $text-color;
+  font-size: 13px;
+  line-height: 1.6;
+  max-height: 360px;
+  overflow: auto;
+
+  h4 {
+    margin: 12px 0 6px;
+    color: $text-secondary;
+  }
+
+  p {
+    margin: 0 0 8px;
   }
 }
 

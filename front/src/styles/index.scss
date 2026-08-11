@@ -55,3 +55,99 @@ ol {
 .el-textarea__inner:focus {
   box-shadow: 0 0 0 1px $primary-color inset !important;
 }
+
+// MessageBox：强制暗色卡片（覆盖 EP 默认白底 + 避免浅字）
+.el-message-box {
+  --el-bg-color: #1a1d24;
+  --el-messagebox-width: 420px;
+  --el-messagebox-title-color: #{$text-color};
+  --el-messagebox-content-color: #{$text-color};
+  --el-messagebox-border-radius: 14px;
+  --el-color-primary: #{$primary-color};
+  padding: 0 !important;
+  background-color: #1a1d24 !important;
+  border: 1px solid #{$border-color} !important;
+  border-radius: 14px !important;
+  box-shadow: 0 16px 48px rgba(0, 0, 0, 0.45) !important;
+
+  .el-message-box__header {
+    padding: 18px 20px 0 !important;
+  }
+
+  .el-message-box__title {
+    color: #{$text-color} !important;
+    font-size: 17px !important;
+    font-weight: 700 !important;
+  }
+
+  .el-message-box__headerbtn {
+    top: 14px !important;
+    right: 12px !important;
+
+    .el-message-box__close {
+      color: #{$text-secondary} !important;
+
+      &:hover {
+        color: #{$text-color} !important;
+      }
+    }
+  }
+
+  .el-message-box__content {
+    padding: 14px 20px 8px !important;
+    color: #{$text-color} !important;
+  }
+
+  .el-message-box__container {
+    align-items: flex-start;
+  }
+
+  .el-message-box__message {
+    font-size: 14px !important;
+    line-height: 1.6 !important;
+    color: #{$text-color} !important;
+
+    p {
+      margin: 0;
+      color: #{$text-color} !important;
+    }
+  }
+
+  .el-message-box__btns {
+    padding: 12px 20px 18px !important;
+  }
+
+  .el-button {
+    border-radius: 8px;
+  }
+
+  .el-button--default {
+    --el-button-bg-color: #2a2e38;
+    --el-button-border-color: #{$border-color};
+    --el-button-text-color: #{$text-color};
+    --el-button-hover-bg-color: #343946;
+    --el-button-hover-border-color: #3a404c;
+    --el-button-hover-text-color: #fff;
+    background-color: #2a2e38 !important;
+    border-color: #{$border-color} !important;
+    color: #{$text-color} !important;
+  }
+
+  .el-button--primary {
+    --el-button-bg-color: #{$primary-color};
+    --el-button-border-color: #{$primary-color};
+    --el-button-hover-bg-color: #{$primary-soft};
+    --el-button-hover-border-color: #{$primary-soft};
+    background-color: #{$primary-color} !important;
+    border-color: #{$primary-color} !important;
+    color: #fff !important;
+  }
+}
+
+.el-overlay-message-box {
+  backdrop-filter: blur(2px);
+}
+
+.persona-switch-box.el-message-box {
+  --el-messagebox-width: 440px;
+}

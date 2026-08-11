@@ -10,6 +10,7 @@ from fastapi.security import HTTPAuthorizationCredentials
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from analytics import track_event
 from auth.deps import get_optional_bearer, get_principal, require_user_principal
 from auth.passwords import hash_password, verify_password
 from auth.tokens import (
@@ -19,11 +20,24 @@ from auth.tokens import (
     decode_token,
 )
 from db import get_db
-from models import AuthSession, ChatSession, ConsentLog, Guest, User
+from models import (
+    AnalyticsEvent,
+    AuthSession,
+    ChatRequestLog,
+    ChatSession,
+    ConsentLog,
+    Guest,
+    MessageFeedback,
+    PermissionLog,
+    User,
+    UserPreference,
+)
+from permission_audit import log_permission
 from schemas import (
     AuthTokenResponse,
     ClaimGuestRequest,
     ClaimGuestResponse,
+    DeleteAccountRequest,
     GuestTokenResponse,
     LoginRequest,
     LogoutRequest,
@@ -85,7 +99,10 @@ def create_guest(
 
 @router.post("/register", response_model=AuthTokenResponse)
 def register(payload: RegisterRequest, db: Annotated[Session, Depends(get_db)]):
-    """用户名密码注册；不自动合并匿名数据。"""
+    """用户名密码注册；须同意隐私说明；不自动合并匿名数据。"""
+    if payload.privacy_accepted is not True:
+        raise HTTPException(status_code=400, detail="请先阅读并同意隐私说明")
+
     username_key = payload.username.lower()
     exists = db.scalars(select(User).where(User.username == username_key)).first()
     if exists:
@@ -96,8 +113,26 @@ def register(payload: RegisterRequest, db: Annotated[Session, Depends(get_db)]):
         password_hash=hash_password(payload.password),
     )
     db.add(user)
+    db.flush()
+    db.add(UserPreference(user_id=user.id, memory_enabled=0))
     db.commit()
     db.refresh(user)
+
+    log_permission(
+        db,
+        owner_type="user",
+        owner_id=user.id,
+        purpose="privacy_policy",
+        action="grant",
+        detail="register_accept",
+    )
+    track_event(
+        db,
+        "user_registered",
+        owner_type="user",
+        owner_id=user.id,
+        props={"username": user.username},
+    )
     return _issue_user_tokens(db, user)
 
 
@@ -112,6 +147,13 @@ def login(payload: LoginRequest, db: Annotated[Session, Depends(get_db)]):
         or not verify_password(payload.password, user.password_hash)
     ):
         raise HTTPException(status_code=401, detail="用户名或密码错误")
+    track_event(
+        db,
+        "user_login",
+        owner_type="user",
+        owner_id=user.id,
+        props={"username": user.username},
+    )
     return _issue_user_tokens(db, user)
 
 
@@ -236,4 +278,97 @@ def claim_guest(
         )
     )
     db.commit()
+    log_permission(
+        db,
+        owner_type="user",
+        owner_id=principal.id,
+        purpose="claim_guest",
+        action="grant",
+        detail=f"guest_id={guest_id};sessions={count}",
+    )
+    track_event(
+        db,
+        "guest_claimed",
+        owner_type="user",
+        owner_id=principal.id,
+        props={"guest_id": guest_id, "session_count": count},
+    )
     return ClaimGuestResponse(claimed_session_count=count)
+
+
+@router.delete("/account")
+def delete_account(
+    payload: DeleteAccountRequest,
+    principal: Annotated[Principal, Depends(require_user_principal)],
+    db: Annotated[Session, Depends(get_db)],
+):
+    """注销账号：校验密码后级联删除个人数据。"""
+    user = db.get(User, principal.id)
+    if user is None or user.status != "active":
+        raise HTTPException(status_code=404, detail="账号不存在")
+    if not verify_password(payload.password, user.password_hash):
+        raise HTTPException(status_code=401, detail="密码错误")
+
+    user_id = user.id
+
+    for sess in db.scalars(
+        select(ChatSession).where(
+            ChatSession.owner_type == "user",
+            ChatSession.owner_id == user_id,
+        )
+    ).all():
+        db.delete(sess)
+
+    for row in db.scalars(select(AuthSession).where(AuthSession.user_id == user_id)).all():
+        db.delete(row)
+
+    for row in db.scalars(
+        select(ChatRequestLog).where(
+            ChatRequestLog.owner_type == "user",
+            ChatRequestLog.owner_id == user_id,
+        )
+    ).all():
+        db.delete(row)
+
+    for row in db.scalars(select(ConsentLog).where(ConsentLog.user_id == user_id)).all():
+        db.delete(row)
+
+    pref = db.get(UserPreference, user_id)
+    if pref is not None:
+        db.delete(pref)
+
+    for row in db.scalars(
+        select(MessageFeedback).where(
+            MessageFeedback.owner_type == "user",
+            MessageFeedback.owner_id == user_id,
+        )
+    ).all():
+        db.delete(row)
+
+    for row in db.scalars(
+        select(PermissionLog).where(
+            PermissionLog.owner_type == "user",
+            PermissionLog.owner_id == user_id,
+        )
+    ).all():
+        db.delete(row)
+
+    for row in db.scalars(
+        select(AnalyticsEvent).where(
+            AnalyticsEvent.owner_type == "user",
+            AnalyticsEvent.owner_id == user_id,
+        )
+    ).all():
+        db.delete(row)
+
+    track_event(
+        db,
+        "account_deleted",
+        owner_type="system",
+        owner_id="",
+        props={"former_user_id_hash": user_id[:8]},
+        commit=False,
+    )
+    db.delete(user)
+    db.commit()
+    return {"ok": True}

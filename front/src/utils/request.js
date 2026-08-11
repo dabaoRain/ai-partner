@@ -47,7 +47,10 @@ service.interceptors.response.use(
       }
     }
 
-    ElMessage.error(message)
+    // silent：用于探测类请求（如登录前统计 guest 会话），不弹全局错误
+    if (!error.config?.silent) {
+      ElMessage.error(message)
+    }
     return Promise.reject(error)
   }
 )

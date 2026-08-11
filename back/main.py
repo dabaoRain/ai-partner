@@ -6,7 +6,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from config import CORS_ORIGINS
 from db import init_db
-from routers import auth, chat, health, sessions
+from routers import auth, chat, events, health, personas, privacy, sessions
 
 
 @asynccontextmanager
@@ -27,6 +27,9 @@ app.add_middleware(
 
 app.include_router(health.router)
 app.include_router(auth.router)
+app.include_router(privacy.router)
+app.include_router(events.router)
+app.include_router(personas.router)
 app.include_router(sessions.router)
 app.include_router(chat.router)
 
