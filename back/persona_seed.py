@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import json
 import re
+import shutil
 from pathlib import Path
 
 from sqlalchemy import select
@@ -11,6 +12,8 @@ from sqlalchemy.orm import Session
 from models import Persona
 
 PERSONA_MD = Path(__file__).resolve().parent.parent / "persona" / "index.md"
+IMAGES_SRC = Path(__file__).resolve().parent.parent / "images"
+STATIC_PERSONAS = Path(__file__).resolve().parent / "static" / "personas"
 
 _OVERVIEW_ROW = re.compile(
     r"\|\s*`([^`]+)`\s*\|\s*([^|]+?)\s*\|\s*([^|]+?)\s*\|\s*(\d+)\s*\|\s*([^|]+?)\s*\|\s*(\w+)\s*\|"
@@ -21,6 +24,27 @@ _LIST_FIELD = re.compile(
     r"^- \*\*(catchphrases|interests|intimacy_stages|开场白|彩蛋触发)\*\*：\s*$",
     re.M,
 )
+
+
+def sync_persona_images() -> int:
+    """按序号将仓库 images/{n}.jpg 同步到可访问静态目录。"""
+    STATIC_PERSONAS.mkdir(parents=True, exist_ok=True)
+    copied = 0
+    for idx in range(1, 16):
+        src = IMAGES_SRC / f"{idx}.jpg"
+        if not src.is_file():
+            continue
+        dst = STATIC_PERSONAS / f"{idx}.jpg"
+        shutil.copy2(src, dst)
+        copied += 1
+    return copied
+
+
+def avatar_url_for_order(sort_order: int) -> str:
+    """人设排序序号 → 静态图 URL。"""
+    if sort_order < 1:
+        return ""
+    return f"/static/personas/{sort_order}.jpg"
 
 
 def _dumps(value: object) -> str:
@@ -186,6 +210,7 @@ def parse_persona_markdown(md_path: Path | None = None) -> list[dict]:
                 "sort_order": int(fields["sort_order"]),
                 "name": str(fields.get("name") or "").strip(),
                 "age": age,
+                "avatar_url": avatar_url_for_order(int(fields["sort_order"])),
                 "identity": str(fields.get("identity") or "").strip(),
                 "tone": str(fields.get("tone") or "").strip(),
                 "catchphrases": _dumps(fields.get("catchphrases") or []),
@@ -205,6 +230,7 @@ def parse_persona_markdown(md_path: Path | None = None) -> list[dict]:
 
 def seed_official_personas(db: Session, *, replace: bool = True) -> int:
     """将官方人设写入数据库；replace=True 时先清空人设表再全量写入。"""
+    sync_persona_images()
     cards = parse_persona_markdown()
     if not cards:
         raise RuntimeError(f"未能从 {PERSONA_MD} 解析到任何人设")

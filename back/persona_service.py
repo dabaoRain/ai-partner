@@ -16,6 +16,7 @@ from persona_seed import default_persona_id
 PERSONA_FIELD_KEYS = (
     "name",
     "age",
+    "avatar_url",
     "region",
     "metaphor",
     "identity",
@@ -85,6 +86,7 @@ def normalize_persona(data: dict[str, Any]) -> dict[str, str]:
     return {
         "name": name,
         "age": str(_as_age(data.get("age"))),
+        "avatar_url": (data.get("avatar_url") or "").strip(),
         "region": (data.get("region") or "").strip(),
         "metaphor": (data.get("metaphor") or "").strip(),
         "identity": (data.get("identity") or "").strip(),
@@ -105,6 +107,7 @@ def persona_snapshot(row: Persona | Any) -> dict[str, str]:
     return {
         "name": (getattr(row, "name", None) or "").strip(),
         "age": str(_as_age(getattr(row, "age", None))),
+        "avatar_url": (getattr(row, "avatar_url", None) or "").strip(),
         "region": (getattr(row, "region", None) or "").strip(),
         "metaphor": (getattr(row, "metaphor", None) or "").strip(),
         "identity": (getattr(row, "identity", None) or "").strip(),
@@ -134,6 +137,7 @@ def snapshot_to_api(fields: dict[str, str]) -> dict[str, Any]:
     return {
         "name": fields.get("name") or "",
         "age": _as_age(fields.get("age")),
+        "avatar_url": fields.get("avatar_url") or "",
         "region": fields.get("region") or "",
         "metaphor": fields.get("metaphor") or "",
         "identity": fields.get("identity") or "",
@@ -159,6 +163,7 @@ def persona_to_dict(row: Persona) -> dict:
         "sort_order": int(row.sort_order or 0),
         "name": snap["name"],
         "age": _as_age(snap["age"]),
+        "avatar_url": snap["avatar_url"],
         "identity": snap["identity"],
         "tone": snap["tone"],
         "catchphrases": _loads_list(snap["catchphrases"]),

@@ -38,6 +38,12 @@
       type="button"
       @click="$emit('open-persona')"
     >
+      <PersonaAvatar
+        v-if="partnerAvatar"
+        class="chat-sidebar__persona-avatar"
+        :url="partnerAvatar"
+        :alt="partnerName || '人设'"
+      />
       <div class="chat-sidebar__persona-entry-main">
         <div class="chat-sidebar__persona-entry-title">伴侣人设</div>
         <div class="chat-sidebar__persona-entry-summary" :title="personaSummary">
@@ -65,6 +71,7 @@
 import { computed } from 'vue'
 import { EditPen, Document, CloseBold, ArrowRight } from '@element-plus/icons-vue'
 import UserMenu from '@/components/chat/UserMenu.vue'
+import PersonaAvatar from '@/components/chat/PersonaAvatar.vue'
 
 const props = defineProps({
   sessions: {
@@ -80,6 +87,10 @@ const props = defineProps({
     default: '',
   },
   identity: {
+    type: String,
+    default: '',
+  },
+  partnerAvatar: {
     type: String,
     default: '',
   },
@@ -258,6 +269,13 @@ const personaSummary = computed(() => {
       background: #2a2e38;
       border-color: #3a404c;
     }
+  }
+
+  &__persona-avatar {
+    width: 44px;
+    height: 56px;
+    border-radius: 8px;
+    flex-shrink: 0;
   }
 
   &__persona-entry-main {

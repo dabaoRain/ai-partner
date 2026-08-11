@@ -17,6 +17,7 @@
     <ChatSidebar
       :partner-name="partnerName"
       :identity="identity"
+      :partner-avatar="workspacePersona.avatar_url"
       :sessions="sessions"
       :active-id="activeSessionId"
       :is-logged-in="userStore.isLoggedIn"
@@ -34,6 +35,8 @@
       :session-id="activeSessionId"
       :messages="activeMessages"
       :sending="sending"
+      :partner-avatar="workspacePersona.avatar_url"
+      :partner-name="partnerName"
       @send="sendMessage"
       @stop="stopGeneration"
       @retry="retryMessage"

@@ -17,6 +17,7 @@ class PersonaFields(BaseModel):
 
     name: str = Field(..., min_length=1, max_length=100)
     age: int = Field(default=0, ge=0, le=120)
+    avatar_url: str = Field(default="", max_length=255)
     region: str = Field(default="", max_length=64)
     metaphor: str = Field(default="", max_length=64)
     identity: str = Field(default="", max_length=1000)

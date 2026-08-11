@@ -105,6 +105,7 @@ def _apply_snapshot(row: ChatSession, fields: dict[str, str], persona_id: str | 
         row.age = int(fields.get("age") or 0)
     except (TypeError, ValueError):
         row.age = 0
+    row.avatar_url = fields.get("avatar_url") or ""
     row.identity = fields["identity"]
     row.tone = fields["tone"]
     row.catchphrases = fields["catchphrases"]
@@ -264,10 +265,23 @@ def get_session_detail(
         if rating in ("up", "down"):
             item["feedback"] = rating
 
+    persona_fields = snapshot_to_api(persona_snapshot(row))
+    # 旧会话快照缺美图时，从官方人设库回填
+    if not persona_fields.get("avatar_url") and getattr(row, "persona_id", None):
+        try:
+            lib = get_persona(db, row.persona_id)
+            url = (getattr(lib, "avatar_url", None) or "").strip()
+            if url:
+                persona_fields["avatar_url"] = url
+                row.avatar_url = url
+                db.commit()
+        except HTTPException:
+            pass
+
     return {
         "session_id": row.id,
         "persona_id": getattr(row, "persona_id", None),
-        **snapshot_to_api(persona_snapshot(row)),
+        **persona_fields,
         "created_at": _fmt(row.created_at),
         "updated_at": _fmt(row.updated_at),
         "messages": messages,

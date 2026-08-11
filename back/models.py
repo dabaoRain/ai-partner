@@ -75,6 +75,8 @@ class Persona(Base):
     name: Mapped[str] = mapped_column(String(100))
     # 人设年龄（岁），官方库约定 25～28
     age: Mapped[int] = mapped_column(Integer, default=0)
+    # 人设美图：相对站点路径，如 /static/personas/1.jpg
+    avatar_url: Mapped[str] = mapped_column(String(255), default="")
     identity: Mapped[str] = mapped_column(Text, default="")
     tone: Mapped[str] = mapped_column(Text, default="")
     # JSON 数组字符串
@@ -114,6 +116,7 @@ class ChatSession(Base):
     region: Mapped[str] = mapped_column(String(64), default="")
     metaphor: Mapped[str] = mapped_column(String(64), default="")
     age: Mapped[int] = mapped_column(Integer, default=0)
+    avatar_url: Mapped[str] = mapped_column(String(255), default="")
     identity: Mapped[str] = mapped_column(Text, default="")
     tone: Mapped[str] = mapped_column(Text, default="")
     catchphrases: Mapped[str] = mapped_column(Text, default="[]")

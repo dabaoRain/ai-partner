@@ -39,7 +39,13 @@
             @click="selectedId = item.id"
           >
             <div class="persona-library__name">
-              {{ item.name }}
+              <PersonaAvatar
+                v-if="item.avatar_url"
+                class="persona-library__thumb"
+                :url="item.avatar_url"
+                :alt="item.name"
+              />
+              <span class="persona-library__name-text">{{ item.name }}</span>
               <span v-if="item.id === personaId" class="persona-library__badge">使用中</span>
             </div>
             <div class="persona-library__meta">
@@ -52,6 +58,13 @@
 
       <div v-if="selected" ref="detailPanelRef" class="persona-detail">
         <header class="persona-detail__head">
+          <div class="persona-detail__portrait" v-if="selected.avatar_url">
+            <PersonaAvatar
+              class="persona-detail__portrait-img"
+              :url="selected.avatar_url"
+              :alt="selected.name"
+            />
+          </div>
           <div class="persona-detail__titles">
             <h3 class="persona-detail__name">{{ selected.name }}</h3>
             <div class="persona-detail__tags">
@@ -184,6 +197,7 @@ import { ElMessage } from 'element-plus'
 import { User } from '@element-plus/icons-vue'
 import { fetchPersonas } from '@/api/persona'
 import { normalizePersona } from '@/constants/personaPresets'
+import PersonaAvatar from '@/components/chat/PersonaAvatar.vue'
 
 const props = defineProps({
   modelValue: {
@@ -413,10 +427,26 @@ watch(selectedId, () => {
   &__name {
     display: flex;
     align-items: center;
-    gap: 6px;
+    gap: 8px;
     font-size: 14px;
     font-weight: 650;
     color: $text-color;
+  }
+
+  &__thumb {
+    width: 32px;
+    height: 32px;
+    border-radius: 8px;
+    object-fit: cover;
+    flex-shrink: 0;
+    background: rgba(255, 255, 255, 0.06);
+  }
+
+  &__name-text {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
 
   &__badge {
@@ -464,9 +494,32 @@ watch(selectedId, () => {
   }
 
   &__head {
+    display: flex;
+    align-items: flex-start;
+    gap: 14px;
     margin-bottom: 16px;
     padding-bottom: 14px;
     border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+  }
+
+  &__portrait {
+    width: 88px;
+    height: 112px;
+    border-radius: 12px;
+    overflow: hidden;
+    flex-shrink: 0;
+    background: rgba(255, 255, 255, 0.04);
+    border: 1px solid rgba(255, 255, 255, 0.06);
+  }
+
+  &__portrait-img {
+    width: 100%;
+    height: 100%;
+  }
+
+  &__titles {
+    min-width: 0;
+    flex: 1;
   }
 
   &__name {

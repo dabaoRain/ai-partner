@@ -9,8 +9,14 @@
       >
         <el-icon :size="22"><Fold /></el-icon>
       </button>
+      <PersonaAvatar
+        v-if="partnerAvatar"
+        class="chat-panel__partner-avatar"
+        :url="partnerAvatar"
+        :alt="partnerName || '伴侣'"
+      />
       <div class="chat-panel__header-text">
-        <h1 class="chat-panel__title">AI智能伴侣</h1>
+        <h1 class="chat-panel__title">{{ partnerName || 'AI智能伴侣' }}</h1>
         <p class="chat-panel__session">当前会话: {{ sessionId || '暂无会话' }}</p>
       </div>
     </header>
@@ -23,7 +29,13 @@
         :class="`is-${msg.role}`"
       >
         <div class="chat-panel__avatar" :class="`is-${msg.role}`">
-          <el-icon :size="18">
+          <PersonaAvatar
+            v-if="msg.role === 'assistant' && partnerAvatar"
+            class="chat-panel__avatar-img"
+            :url="partnerAvatar"
+            :alt="partnerName || '伴侣'"
+          />
+          <el-icon v-else :size="18">
             <UserFilled v-if="msg.role === 'user'" />
             <Monitor v-else />
           </el-icon>
@@ -186,6 +198,7 @@ import {
 } from '@element-plus/icons-vue'
 import { useSpeechRecognition } from '@/composables/useSpeechRecognition'
 import { useAppStore } from '@/store/app'
+import PersonaAvatar from '@/components/chat/PersonaAvatar.vue'
 
 const props = defineProps({
   sessionId: {
@@ -199,6 +212,14 @@ const props = defineProps({
   sending: {
     type: Boolean,
     default: false,
+  },
+  partnerAvatar: {
+    type: String,
+    default: '',
+  },
+  partnerName: {
+    type: String,
+    default: '',
   },
 })
 
@@ -398,6 +419,15 @@ watch(
     min-width: 0;
   }
 
+  &__partner-avatar {
+    width: 52px;
+    height: 66px;
+    border-radius: 12px;
+    flex-shrink: 0;
+    margin-top: 2px;
+    border: 1px solid rgba(255, 255, 255, 0.08);
+  }
+
   &__title {
     margin: 0;
     font-size: 34px;
@@ -439,6 +469,8 @@ watch(
     align-items: center;
     justify-content: center;
     color: #fff;
+    overflow: hidden;
+    flex-shrink: 0;
 
     &.is-user {
       background: #e53935;
@@ -447,6 +479,12 @@ watch(
     &.is-assistant {
       background: $primary-color;
     }
+  }
+
+  &__avatar-img {
+    width: 100%;
+    height: 100%;
+    border-radius: 50%;
   }
 
   &__bubble {

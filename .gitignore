@@ -1,0 +1,20 @@
+# 根目录忽略
+.DS_Store
+*.log
+.idea/
+.vscode/
+
+# 本地密钥与运行数据（勿提交）
+back/.env
+back/.venv/
+back/__pycache__/
+back/**/__pycache__/
+back/*.pyc
+back/data/*.db
+back/data/*.db-*
+back/sessions/*.json
+back/static/
+
+# 前端
+front/node_modules/
+front/dist/

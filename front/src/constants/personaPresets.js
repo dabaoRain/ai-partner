@@ -3,6 +3,7 @@
 export const PERSONA_CONTENT_KEYS = [
   'name',
   'age',
+  'avatar_url',
   'region',
   'metaphor',
   'identity',
@@ -40,6 +41,7 @@ export function normalizePersona(detail) {
   return {
     name: (d.name || '').trim(),
     age: Number(d.age) > 0 ? Number(d.age) : 0,
+    avatar_url: (d.avatar_url || '').trim(),
     region: (d.region || '').trim(),
     metaphor: (d.metaphor || '').trim(),
     identity: (d.identity || '').trim(),
@@ -53,6 +55,19 @@ export function normalizePersona(detail) {
     openings: asList(d.openings),
     easter_eggs: asList(d.easter_eggs),
   }
+}
+
+/**
+ * 将人设 avatar_url 转为前端可请求地址（走 /api 代理）
+ * @param {string} url
+ */
+export function resolvePersonaAvatar(url) {
+  const raw = (url || '').trim()
+  if (!raw) return ''
+  if (/^https?:\/\//i.test(raw) || raw.startsWith('data:')) return raw
+  const prefix = (import.meta.env.VITE_API_PREFIX || '/api').replace(/\/$/, '')
+  if (raw.startsWith('/')) return `${prefix}${raw}`
+  return `${prefix}/${raw}`
 }
 
 /** @param {Record<string, any>} a @param {Record<string, any>} b */

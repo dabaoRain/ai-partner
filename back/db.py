@@ -72,11 +72,17 @@ def _migrate_sqlite_columns() -> None:
     with engine.begin() as conn:
         _add_missing(
             "personas",
-            {"age": "INTEGER DEFAULT 0"},
+            {
+                "age": "INTEGER DEFAULT 0",
+                "avatar_url": "VARCHAR(255) DEFAULT ''",
+            },
         )
         _add_missing(
             "chat_sessions",
-            {"age": "INTEGER DEFAULT 0"},
+            {
+                "age": "INTEGER DEFAULT 0",
+                "avatar_url": "VARCHAR(255) DEFAULT ''",
+            },
         )
 
 

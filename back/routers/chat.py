@@ -188,6 +188,7 @@ def chat(
         "region": payload.region,
         "metaphor": payload.metaphor,
         "age": payload.age,
+        "avatar_url": payload.avatar_url,
         "identity": payload.identity,
         "tone": payload.tone,
         "catchphrases": payload.catchphrases,
