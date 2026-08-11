@@ -16,12 +16,51 @@
         :alt="partnerName || '伴侣'"
       />
       <div class="chat-panel__header-text">
-        <h1 class="chat-panel__title">{{ partnerName || 'AI智能伴侣' }}</h1>
-        <p class="chat-panel__session">当前会话: {{ sessionId || '暂无会话' }}</p>
+        <h1 class="chat-panel__title">{{ partnerName || '请选择伴侣' }}</h1>
+        <p class="chat-panel__session">
+          {{ partnerName ? partnerMeta || '官方伴侣' : '尚未选择伴侣' }}
+        </p>
       </div>
     </header>
 
     <div ref="listRef" class="chat-panel__messages">
+      <div
+        v-if="!sessionId && !messages.length"
+        class="chat-panel__empty"
+      >
+        <p class="chat-panel__empty-title">
+          {{
+            partnerName
+              ? `准备和「${partnerName}」聊天`
+              : '先选择一位伴侣'
+          }}
+        </p>
+        <p class="chat-panel__empty-desc">
+          {{
+            partnerName
+              ? '发出第一句话后，会建立你们的专属关系线。'
+              : '先挑选一位伴侣，再开启你们的关系线'
+          }}
+        </p>
+        <button
+          v-if="partnerName"
+          class="chat-panel__empty-action"
+          type="button"
+          :disabled="sending"
+          @click="$emit('start')"
+        >
+          开始和 TA 聊天
+        </button>
+        <button
+          v-else
+          class="chat-panel__empty-action"
+          type="button"
+          :disabled="sending"
+          @click="$emit('choose-persona')"
+        >
+          选择伴侣
+        </button>
+      </div>
       <div
         v-for="(msg, index) in messages"
         :key="index"
@@ -138,9 +177,9 @@
             v-model="draft"
             class="chat-panel__text"
             type="text"
-            placeholder="请输入您的问题..."
-            :disabled="sending"
-            :aria-disabled="sending"
+            :placeholder="inputPlaceholder"
+            :disabled="sending || !canCompose"
+            :aria-disabled="sending || !canCompose"
             @keydown.enter.prevent="handleSend"
           />
 
@@ -148,7 +187,7 @@
             v-else
             class="chat-panel__hold"
             type="button"
-            :disabled="sending || !supported"
+            :disabled="sending || !supported || !canCompose"
             :title="voiceTitle"
             @contextmenu.prevent
             @pointerdown="handleVoiceStart"
@@ -174,7 +213,7 @@
           class="chat-panel__send"
           type="button"
           title="发送"
-          :disabled="!draft.trim()"
+          :disabled="!draft.trim() || !canCompose"
           @click="handleSend"
         >
           <el-icon :size="20"><Promotion /></el-icon>
@@ -221,9 +260,24 @@ const props = defineProps({
     type: String,
     default: '',
   },
+  partnerMeta: {
+    type: String,
+    default: '',
+  },
+  canCompose: {
+    type: Boolean,
+    default: false,
+  },
 })
 
-const emit = defineEmits(['send', 'stop', 'retry', 'feedback'])
+const emit = defineEmits([
+  'choose-persona',
+  'start',
+  'send',
+  'stop',
+  'retry',
+  'feedback',
+])
 const appStore = useAppStore()
 
 const draft = ref('')
@@ -252,8 +306,18 @@ const voiceLabel = computed(() => {
 })
 
 const voiceTitle = computed(() => {
+  if (!props.canCompose) return '请先选择伴侣'
   if (!supported.value) return '请使用 Chrome，并确保 HTTPS/localhost'
   return '按住说话，松手后发送给 AI'
+})
+
+const inputPlaceholder = computed(() => {
+  if (!props.canCompose) return '请先选择伴侣'
+  if (!props.sessionId && props.partnerName) {
+    return `对${props.partnerName}说第一句话...`
+  }
+  if (props.partnerName) return `想跟${props.partnerName}说点什么...`
+  return '想跟我说点什么...'
 })
 
 /** 空气泡且正在等待流式首包时展示 thinking */
@@ -304,7 +368,7 @@ function toggleInputMode() {
 
 function handleSend() {
   // 生成中禁止再次提问
-  if (props.sending || listening.value || voiceMode.value) return
+  if (props.sending || listening.value || voiceMode.value || !props.canCompose) return
   const text = draft.value.trim()
   if (!text) return
   emit('send', text)
@@ -312,7 +376,7 @@ function handleSend() {
 }
 
 function handleVoiceStart(event) {
-  if (props.sending || !supported.value || listening.value) return
+  if (props.sending || !props.canCompose || !supported.value || listening.value) return
   if (event.button !== undefined && event.button !== 0) return
 
   event.currentTarget.setPointerCapture?.(event.pointerId)
@@ -453,6 +517,49 @@ watch(
     display: flex;
     flex-direction: column;
     gap: 18px;
+  }
+
+  &__empty {
+    margin: auto;
+    max-width: 320px;
+    padding: 24px 16px;
+    text-align: center;
+  }
+
+  &__empty-title {
+    margin: 0;
+    font-size: 16px;
+    font-weight: 600;
+    color: $text-color;
+  }
+
+  &__empty-desc {
+    margin: 10px 0 0;
+    font-size: 13px;
+    line-height: 1.6;
+    color: $text-secondary;
+  }
+
+  &__empty-action {
+    margin-top: 18px;
+    height: 38px;
+    padding: 0 18px;
+    border: none;
+    border-radius: 19px;
+    background: linear-gradient(90deg, #ff4d1a 0%, #ff7a3d 100%);
+    color: #fff;
+    font-size: 14px;
+    font-weight: 600;
+    cursor: pointer;
+
+    &:hover:not(:disabled) {
+      opacity: 0.92;
+    }
+
+    &:disabled {
+      opacity: 0.55;
+      cursor: not-allowed;
+    }
   }
 
   &__row {
@@ -702,6 +809,7 @@ watch(
 
     &:disabled {
       opacity: 0.6;
+      cursor: not-allowed;
     }
   }
 

@@ -258,7 +258,7 @@ const EVENT_LABELS = {
   session_deleted: '删会话',
   account_deleted: '注销',
   app_open: '打开应用',
-  session_created: '新建会话',
+  session_created: '建立关系线',
   guest_claimed: '合并匿名',
 }
 

@@ -212,6 +212,7 @@ def parse_persona_markdown(md_path: Path | None = None) -> list[dict]:
                 "age": age,
                 "avatar_url": avatar_url_for_order(int(fields["sort_order"])),
                 "identity": str(fields.get("identity") or "").strip(),
+                "motto": str(fields.get("motto") or "").strip(),
                 "tone": str(fields.get("tone") or "").strip(),
                 "catchphrases": _dumps(fields.get("catchphrases") or []),
                 "interests": str(fields.get("interests") or "").strip(),

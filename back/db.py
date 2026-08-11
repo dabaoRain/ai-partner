@@ -75,6 +75,7 @@ def _migrate_sqlite_columns() -> None:
             {
                 "age": "INTEGER DEFAULT 0",
                 "avatar_url": "VARCHAR(255) DEFAULT ''",
+                "motto": "VARCHAR(255) DEFAULT ''",
             },
         )
         _add_missing(
@@ -82,6 +83,7 @@ def _migrate_sqlite_columns() -> None:
             {
                 "age": "INTEGER DEFAULT 0",
                 "avatar_url": "VARCHAR(255) DEFAULT ''",
+                "motto": "VARCHAR(255) DEFAULT ''",
             },
         )
 

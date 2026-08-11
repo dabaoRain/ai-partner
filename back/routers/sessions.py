@@ -86,21 +86,25 @@ def api_create_session(
     principal: Annotated[Principal, Depends(get_principal)],
     db: Annotated[Session, Depends(get_db)],
 ):
-    """新建会话并写入归属。"""
+    """开始与某人设的对话线；默认幂等复用，reset=True 时重建。"""
     try:
-        session_id = create_session(
+        session_id, reused = create_session(
             db,
             principal,
             persona_id=payload.persona_id,
+            reset=payload.reset,
         )
+    except HTTPException:
+        raise
     except Exception as exc:
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=f"创建会话失败: {exc}") from exc
-    track_event(
-        db,
-        "session_created",
-        owner_type=principal.typ,
-        owner_id=principal.id,
-        session_id=session_id,
-    )
-    return CreateSessionResponse(session_id=session_id)
+    if not reused:
+        track_event(
+            db,
+            "session_created",
+            owner_type=principal.typ,
+            owner_id=principal.id,
+            session_id=session_id,
+        )
+    return CreateSessionResponse(session_id=session_id, reused=reused)

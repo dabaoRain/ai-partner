@@ -16,16 +16,13 @@
     />
     <ChatSidebar
       :partner-name="partnerName"
-      :identity="identity"
-      :partner-avatar="workspacePersona.avatar_url"
       :sessions="sessions"
       :active-id="activeSessionId"
       :is-logged-in="userStore.isLoggedIn"
       :username="userStore.userInfo?.username || ''"
       :class="{ 'is-open': isMobile && !appStore.sidebarCollapsed }"
-      @create="handleCreate"
       @select="handleSelect"
-      @remove="removeSession"
+      @session-action="handleSessionAction"
       @open-persona="personaVisible = true"
       @open-auth="backToAuthGate"
       @logout="handleLogout"
@@ -37,6 +34,10 @@
       :sending="sending"
       :partner-avatar="workspacePersona.avatar_url"
       :partner-name="partnerName"
+      :partner-meta="partnerMeta"
+      :can-compose="Boolean(activePersonaId)"
+      @choose-persona="personaVisible = true"
+      @start="handleStartConversation"
       @send="sendMessage"
       @stop="stopGeneration"
       @retry="retryMessage"
@@ -76,25 +77,24 @@ import {
   fetchSessions,
   sendChatStream,
   stopChat,
-  updateSessionPersona,
 } from "@/api/chat";
 import request from "@/utils/request";
 
-import { fetchDefaultPersona } from "@/api/persona";
-import {
-  normalizePersona,
-  personasEqual,
-} from "@/constants/personaPresets";
+import { normalizePersona } from "@/constants/personaPresets";
 
 const appStore = useAppStore();
 const userStore = useUserStore();
 const { isMobile } = useWindowSize();
 
-/** 工作区当前人设（来自官方库或会话快照） */
-const workspacePersona = ref(normalizePersona({ name: "加载中" }));
+/** 工作区当前人设（来自用户选择或会话快照；无对话时不预选） */
+const workspacePersona = ref(normalizePersona({}));
 const partnerName = computed(() => workspacePersona.value.name || "");
-const identity = computed(() => workspacePersona.value.identity || "");
-/** 当前选用的官方人设 id */
+const partnerMeta = computed(() => {
+  const persona = workspacePersona.value;
+  if (!persona.name) return "";
+  return persona.motto || "官方伴侣";
+});
+/** 当前选用的官方人设 id；空表示尚未选择 */
 const activePersonaId = ref("");
 /** 当前会话锁定的人设快照（用于检测变更） */
 const sessionPersonaSnapshot = ref(null);
@@ -112,78 +112,59 @@ function applyPersona(detail, personaId = "") {
   }
 }
 
-async function ensureDefaultPersona() {
-  if (activePersonaId.value && workspacePersona.value.name !== "加载中") {
-    return;
-  }
-  const detail = await fetchDefaultPersona();
-  applyPersona(detail, detail.id);
+/** 清空工作区人设（无对话冷启动） */
+function clearWorkspacePersona() {
+  workspacePersona.value = normalizePersona({});
+  activePersonaId.value = "";
+  sessionPersonaSnapshot.value = null;
 }
 
+/** 按人设 id 查找关系线 */
+function findSessionByPersona(personaId) {
+  const key = (personaId || "").trim();
+  if (!key) return null;
+  return sessions.value.find((item) => (item.personaId || "") === key) || null;
+}
+
+/**
+ * 选择伴侣：有线则打开；无线则进入空态，等用户在主区开始关系
+ */
 async function onPersonaApply({ id, persona }) {
   const next = normalizePersona(persona);
-  const locked = sessionPersonaSnapshot.value;
-  const hasSession = Boolean(activeSessionId.value);
-  const current = sessions.value.find(
-    (item) => item.id === activeSessionId.value,
-  );
-  const isEmptySession = Boolean(
-    current && !current.messages.some((msg) => msg.role === "user"),
-  );
+  const existing = findSessionByPersona(id);
 
-  // 与当前会话锁定人设一致：只更新工作区引用
-  if (hasSession && locked && personasEqual(next, locked)) {
-    applyPersona(next, id);
-    ElMessage.success("人设已应用到当前会话");
-    return;
-  }
-
-  // 空会话：直接改快照，无需新建
-  if (hasSession && isEmptySession && (!locked || !personasEqual(next, locked))) {
-    const detail = await updateSessionPersona(activeSessionId.value, {
-      persona_id: id,
-    });
-    applyPersona(detail, detail.persona_id || id);
-    sessionPersonaSnapshot.value = normalizePersona(detail);
-    const item = sessions.value.find((s) => s.id === activeSessionId.value);
-    if (item) {
-      item.name = detail.name || item.name;
-      item.identity = detail.identity || "";
-      item.tone = detail.tone || "";
-      item.personaId = detail.persona_id || id || "";
-      item.messages = detail.messages || [];
-    }
-    ElMessage.success("人设已更新到当前会话");
-    return;
-  }
-
-  // 已有问答：必须新建会话
-  if (hasSession && locked && !personasEqual(next, locked)) {
-    try {
-      await ElMessageBox.confirm(
-        `当前会话已绑定人设「${locked.name || "未命名"}」，更换人设需要新建会话。是否继续？`,
-        "更换人设",
-        {
-          type: "warning",
-          confirmButtonText: "新建会话",
-          cancelButtonText: "取消",
-          customClass: "persona-switch-box",
-          appendTo: document.body,
-          center: false,
-        },
-      );
-    } catch {
-      return;
-    }
-    applyPersona(next, id);
-    await createSession({ force: true, personaId: id });
-    ElMessage.success("已用人设新建会话");
-    return;
-  }
-
-  // 无会话：应用并等待用户发消息时自动建会话
   applyPersona(next, id);
-  ElMessage.success("人设已应用，发送消息或新建会话后生效");
+
+  if (existing) {
+    await selectSession(existing.id);
+    ElMessage.success(`已打开与「${next.name || "该人设"}」的对话`);
+    return;
+  }
+
+  activeSessionId.value = "";
+  sessionPersonaSnapshot.value = null;
+  ElMessage.success(
+    `已选择「${next.name || "该人设"}」，可以开始和 TA 聊天了`,
+  );
+}
+
+/** 会话列表展示名：人设姓名（关系线模型一人设一线） */
+function formatSessionTitle(name) {
+  return (name || "").trim() || "未命名";
+}
+
+function patchSessionItemFromDetail(item, detail, personaId = "") {
+  item.name = detail.name || item.name;
+  item.identity = detail.identity || "";
+  item.motto = detail.motto || "";
+  item.tone = detail.tone || "";
+  item.region = detail.region || "";
+  item.avatarUrl = detail.avatar_url || item.avatarUrl || "";
+  item.personaId = detail.persona_id || personaId || item.personaId || "";
+  item.createdAt = detail.created_at || item.createdAt || "";
+  item.updatedAt = detail.updated_at || item.updatedAt || "";
+  item.messages = detail.messages || item.messages || [];
+  item.title = formatSessionTitle(item.name);
 }
 
 const sessions = ref([]);
@@ -220,13 +201,20 @@ watch(
 );
 
 function mapSessionItem(item, messages = []) {
+  const name = item.name || "";
   return {
     id: item.session_id,
-    name: item.name || "",
+    name,
+    title: formatSessionTitle(name),
     identity: item.identity || "",
+    motto: item.motto || "",
     tone: item.tone || "",
+    region: item.region || "",
+    avatarUrl: item.avatar_url || "",
     personality: item.personality || "",
     personaId: item.persona_id || "",
+    createdAt: item.created_at || "",
+    updatedAt: item.updated_at || "",
     messages,
   };
 }
@@ -250,39 +238,34 @@ async function loadSessions() {
 }
 
 async function enterChatWorkspace() {
-  await ensureDefaultPersona();
   await loadSessions();
   appReady.value = true;
   trackClientEvent("app_open", {
     props: { logged_in: userStore.isLoggedIn },
   });
   if (!activeSessionId.value && sessions.value.length) {
+    // 再次进入：打开最近更新的关系线（人设来自该对话）
     await selectSession(sessions.value[0].id);
   } else if (!sessions.value.length) {
-    // 无历史会话时自动建一个，并展示人设开场白
-    await createSession({ force: true });
+    // 无对话：不预选默认人设，须手动选择伴侣
+    activeSessionId.value = "";
+    clearWorkspacePersona();
   }
 }
 
-async function createSession(options = {}) {
-  const force = Boolean(options.force);
-  const personaId = options.personaId || activePersonaId.value || "";
-
-  if (!force && activeSessionId.value) {
-    const current = sessions.value.find(
-      (item) => item.id === activeSessionId.value,
-    );
-    if (current && !current.messages.some((msg) => msg.role === "user")) {
-      ElMessage.info("当前会话还没有问答，无需新建");
-      return activeSessionId.value;
-    }
+/**
+ * 打开或创建当前工作区人设的关系线。
+ * @param {{ reset?: boolean }} options
+ */
+async function openOrStartConversation(options = {}) {
+  const reset = Boolean(options.reset);
+  const personaId = activePersonaId.value || "";
+  if (!personaId) {
+    ElMessage.warning("请先选择伴侣人设");
+    return "";
   }
 
-  const payload = {};
-  if (personaId) {
-    payload.persona_id = personaId;
-  }
-
+  const payload = { persona_id: personaId, reset };
   const res = await createSessionApi(payload);
   await loadSessions();
   activeSessionId.value = res.session_id;
@@ -290,23 +273,45 @@ async function createSession(options = {}) {
   const detail = await fetchSessionDetail(res.session_id);
   applyPersona(detail, detail.persona_id || personaId);
   sessionPersonaSnapshot.value = normalizePersona(detail);
-  const created = sessions.value.find((item) => item.id === res.session_id);
-  if (created) {
-    created.messages = detail.messages || [];
+  const row = sessions.value.find((item) => item.id === res.session_id);
+  if (row) {
+    patchSessionItemFromDetail(row, detail, personaId);
   }
   return res.session_id;
 }
 
-async function handleCreate() {
-  await createSession();
-  if (isMobile.value) {
-    appStore.closeSidebar();
+/** 主区 CTA：开始/打开当前伴侣关系线 */
+async function handleStartConversation() {
+  if (!activePersonaId.value) {
+    personaVisible.value = true;
+    ElMessage.info("请先选择一位伴侣");
+    return "";
   }
+
+  const personaId = activePersonaId.value;
+  const personaName = partnerName.value || "该人设";
+  const existing = findSessionByPersona(personaId);
+
+  if (!existing) {
+    const sessionId = await openOrStartConversation({ reset: false });
+    ElMessage.success(`已开始与「${personaName}」的对话`);
+    if (isMobile.value) appStore.closeSidebar();
+    return sessionId;
+  }
+
+  if (existing.id !== activeSessionId.value) {
+    await selectSession(existing.id);
+    ElMessage.success(`已打开与「${personaName}」的对话`);
+    if (isMobile.value) appStore.closeSidebar();
+    return existing.id;
+  }
+
+  return existing.id;
 }
 
 async function selectSession(id) {
   if (sending.value) {
-    ElMessage.info("正在回复中，请稍后再切换会话");
+    ElMessage.info("正在回复中，请稍后再切换对话");
     return;
   }
   activeSessionId.value = id;
@@ -320,7 +325,7 @@ async function selectSession(id) {
     current = sessions.value.find((item) => item.id === id);
   }
   if (current) {
-    current.messages = detail.messages || [];
+    patchSessionItemFromDetail(current, detail, detail.persona_id || "");
   }
 }
 
@@ -333,37 +338,93 @@ async function handleSelect(id) {
 
 async function removeSession(id) {
   if (sending.value) {
-    ElMessage.info("正在回复中，请稍后再删除会话");
+    ElMessage.info("正在回复中，请稍后再删除");
     return;
   }
 
-  const list = sessions.value;
-  const idx = list.findIndex((item) => item.id === id);
-  const isActive = activeSessionId.value === id;
-  // 删除前确定「下一个」：优先同列表下一项，否则上一项
-  let nextId = "";
-  if (isActive && idx >= 0) {
-    const neighbor = list[idx + 1] || list[idx - 1];
-    nextId = neighbor?.id || "";
+  const target = sessions.value.find((item) => item.id === id);
+  const name = target?.name || "该人设";
+  try {
+    await ElMessageBox.confirm(
+      `将清空与「${name}」的聊天记录，之后可重新开始。当前伴侣选择会保留，聊天记录不可恢复。`,
+      "清空聊天记录",
+      {
+        type: "warning",
+        confirmButtonText: "清空记录",
+        cancelButtonText: "取消",
+        customClass: "persona-switch-box",
+        appendTo: document.body,
+      },
+    );
+  } catch {
+    return;
   }
 
+  const isActive = activeSessionId.value === id;
   await deleteSession(id);
   await loadSessions();
 
   if (!isActive) return;
 
-  if (nextId && sessions.value.some((item) => item.id === nextId)) {
-    await selectSession(nextId);
-    return;
-  }
-  if (sessions.value.length) {
-    await selectSession(sessions.value[0].id);
+  // 保留工作区人设，进入空态
+  activeSessionId.value = "";
+  sessionPersonaSnapshot.value = null;
+  ElMessage.info("聊天记录已清空，可重新开始");
+}
+
+async function resetSession(id) {
+  if (sending.value) {
+    ElMessage.info("正在回复中，请稍后再重置");
     return;
   }
 
-  activeSessionId.value = "";
-  sessionPersonaSnapshot.value = null;
-  ElMessage.info("暂无会话，可点击「新建会话」开始");
+  const target = sessions.value.find((item) => item.id === id);
+  const personaId = target?.personaId || "";
+  const name = target?.name || "该人设";
+  if (!personaId) {
+    ElMessage.warning("该伴侣缺少人设信息，无法重置");
+    return;
+  }
+
+  try {
+    await ElMessageBox.confirm(
+      `将清空与「${name}」的聊天记录，并重新生成开场白。聊天记录不可恢复。`,
+      "清空并重开",
+      {
+        type: "warning",
+        confirmButtonText: "清空并重开",
+        cancelButtonText: "取消",
+        customClass: "persona-switch-box",
+        appendTo: document.body,
+      },
+    );
+  } catch {
+    return;
+  }
+
+  const res = await createSessionApi({ persona_id: personaId, reset: true });
+  await loadSessions();
+  activeSessionId.value = res.session_id;
+
+  const detail = await fetchSessionDetail(res.session_id);
+  applyPersona(detail, detail.persona_id || personaId);
+  sessionPersonaSnapshot.value = normalizePersona(detail);
+  const row = sessions.value.find((item) => item.id === res.session_id);
+  if (row) {
+    patchSessionItemFromDetail(row, detail, personaId);
+  }
+  ElMessage.success(`已重新开始与「${name}」的聊天`);
+  if (isMobile.value) appStore.closeSidebar();
+}
+
+async function handleSessionAction({ id, command }) {
+  if (command === "reset") {
+    await resetSession(id);
+    return;
+  }
+  if (command === "clear") {
+    await removeSession(id);
+  }
 }
 
 function newClientRequestId() {
@@ -389,6 +450,7 @@ async function stopGeneration() {
 
 /**
  * 发送消息；reuseUser=true 时不重复插入用户气泡（用于重试）。
+ * 无会话时：开始/打开当前人设关系线（与主区开始关系等价）。
  */
 async function sendMessage(text, options = {}) {
   if (sending.value) return;
@@ -397,8 +459,13 @@ async function sendMessage(text, options = {}) {
   const clientRequestId = options.clientRequestId || newClientRequestId();
 
   try {
+    if (!activePersonaId.value) {
+      personaVisible.value = true;
+      ElMessage.info("请先选择一位伴侣");
+      return;
+    }
     if (!activeSessionId.value) {
-      await createSession();
+      await openOrStartConversation({ reset: false });
     }
   } catch (error) {
     console.error(error);

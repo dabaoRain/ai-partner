@@ -26,6 +26,7 @@ def build_system_prompt(
     personality: str = "",
     *,
     identity: str = "",
+    motto: str = "",
     tone: str = "",
     interests: str = "",
     relationship_boundary: str = "",
@@ -71,6 +72,8 @@ def build_system_prompt(
         )
     if identity.strip():
         lines.append(f"【身份】{identity.strip()}")
+    if motto.strip():
+        lines.append(f"【座右铭】{motto.strip()}")
     if tone.strip():
         lines.append(f"【语气】{tone.strip()}")
     if interests.strip():

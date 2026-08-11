@@ -24,17 +24,8 @@ export function fetchSessionDetail(sessionId) {
 }
 
 /**
- * 新建会话（session_id 由后端生成）
- * @param {{
- *   name: string,
- *   identity?: string,
- *   tone?: string,
- *   interests?: string,
- *   relationship_boundary?: string,
- *   taboos?: string,
- *   personality?: string,
- *   persona_id?: string
- * }} data
+ * 开始/重置与某人设的对话线（session_id 由后端生成）
+ * @param {{ persona_id?: string, reset?: boolean }} data
  */
 export function createSession(data) {
   return request({
@@ -96,6 +87,7 @@ export async function stopChat(clientRequestId) {
  *   message: string,
  *   name: string,
  *   identity?: string,
+ *   motto?: string,
  *   tone?: string,
  *   interests?: string,
  *   relationship_boundary?: string,

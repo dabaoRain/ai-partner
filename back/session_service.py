@@ -53,12 +53,24 @@ def _pick_opening(fields: dict[str, str]) -> str:
 
 
 def _user_message_count(db: Session, session_id: str) -> int:
-    """用户消息数；开场白不算锁定条件。"""
+    """用户消息数。"""
     return int(
         db.scalar(
             select(func.count())
             .select_from(Message)
             .where(Message.session_id == session_id, Message.role == "user")
+        )
+        or 0
+    )
+
+
+def _message_count(db: Session, session_id: str) -> int:
+    """会话内全部消息数（含开场白）；有消息则人设锁定。"""
+    return int(
+        db.scalar(
+            select(func.count())
+            .select_from(Message)
+            .where(Message.session_id == session_id)
         )
         or 0
     )
@@ -107,6 +119,7 @@ def _apply_snapshot(row: ChatSession, fields: dict[str, str], persona_id: str | 
         row.age = 0
     row.avatar_url = fields.get("avatar_url") or ""
     row.identity = fields["identity"]
+    row.motto = fields["motto"]
     row.tone = fields["tone"]
     row.catchphrases = fields["catchphrases"]
     row.interests = fields["interests"]
@@ -127,16 +140,61 @@ def generate_session_id(db: Session) -> str:
         now += timedelta(seconds=1)
 
 
+def find_owner_session_by_persona(
+    db: Session,
+    principal: Principal,
+    persona_id: str,
+) -> ChatSession | None:
+    """当前主体下指定人设的关系线（至多一条）。"""
+    key = (persona_id or "").strip()
+    if not key:
+        return None
+    return db.scalars(
+        select(ChatSession)
+        .where(
+            ChatSession.owner_type == principal.typ,
+            ChatSession.owner_id == principal.id,
+            ChatSession.persona_id == key,
+        )
+        .order_by(ChatSession.updated_at.desc())
+        .limit(1)
+    ).first()
+
+
 def create_session(
     db: Session,
     principal: Principal,
     *,
     persona_id: str | None = None,
-) -> str:
-    """创建会话：写入官方人设快照，并主动发送一条开场白。"""
+    reset: bool = False,
+) -> tuple[str, bool]:
+    """开始与某人设的对话线。
+
+    - 已有同人设会话且 reset=False：幂等返回已有（reused=True）
+    - reset=True：删除已有后重建
+    - 否则新建并写入开场白
+    """
     resolved = persona_id or default_persona_id(db)
     if not resolved:
         raise HTTPException(status_code=500, detail="官方人设尚未初始化")
+
+    existing = find_owner_session_by_persona(db, principal, resolved)
+    if existing is not None and not reset:
+        return existing.id, True
+    if reset:
+        # 清掉该人设下全部旧线（兼容历史重复数据）
+        old_rows = db.scalars(
+            select(ChatSession).where(
+                ChatSession.owner_type == principal.typ,
+                ChatSession.owner_id == principal.id,
+                ChatSession.persona_id == resolved,
+            )
+        ).all()
+        for old in old_rows:
+            db.delete(old)
+        if old_rows:
+            db.commit()
+
     lib = get_persona(db, resolved)
     fields = persona_snapshot(lib)
 
@@ -165,18 +223,18 @@ def create_session(
             )
         )
     db.commit()
-    return session_id
+    return session_id, False
 
 
 def list_sessions(db: Session, principal: Principal) -> list[dict]:
-    """仅返回当前主体的会话，按 id 倒序。"""
+    """仅返回当前主体的会话，按最近更新倒序。"""
     stmt = (
         select(ChatSession)
         .where(
             ChatSession.owner_type == principal.typ,
             ChatSession.owner_id == principal.id,
         )
-        .order_by(ChatSession.id.desc())
+        .order_by(ChatSession.updated_at.desc(), ChatSession.id.desc())
     )
     rows = db.scalars(stmt).all()
     return [
@@ -185,8 +243,10 @@ def list_sessions(db: Session, principal: Principal) -> list[dict]:
             "name": row.name or "",
             "personality": row.personality or "",
             "identity": getattr(row, "identity", None) or "",
+            "motto": getattr(row, "motto", None) or "",
             "tone": getattr(row, "tone", None) or "",
             "region": getattr(row, "region", None) or "",
+            "avatar_url": getattr(row, "avatar_url", None) or "",
             "persona_id": getattr(row, "persona_id", None),
             "created_at": _fmt(row.created_at),
             "updated_at": _fmt(row.updated_at),
@@ -266,15 +326,22 @@ def get_session_detail(
             item["feedback"] = rating
 
     persona_fields = snapshot_to_api(persona_snapshot(row))
-    # 旧会话快照缺美图时，从官方人设库回填
-    if not persona_fields.get("avatar_url") and getattr(row, "persona_id", None):
+    # 旧会话快照缺展示字段时，从官方人设库回填
+    if (
+        (not persona_fields.get("avatar_url") or not persona_fields.get("motto"))
+        and getattr(row, "persona_id", None)
+    ):
         try:
             lib = get_persona(db, row.persona_id)
             url = (getattr(lib, "avatar_url", None) or "").strip()
+            motto = (getattr(lib, "motto", None) or "").strip()
             if url:
                 persona_fields["avatar_url"] = url
                 row.avatar_url = url
-                db.commit()
+            if motto:
+                persona_fields["motto"] = motto
+                row.motto = motto
+            db.commit()
         except HTTPException:
             pass
 
@@ -334,14 +401,14 @@ def update_session_persona(
     *,
     persona_id: str,
 ) -> dict:
-    """仅允许在尚无用户发言时更换人设快照，并刷新开场白。"""
+    """仅允许在尚无任何消息时更换人设快照；有开场白或问答后锁定。"""
     row = assert_session_owner(db, principal, session_id)
-    if _user_message_count(db, session_id) > 0:
+    if _message_count(db, session_id) > 0:
         raise HTTPException(
             status_code=409,
             detail={
                 "code": "PERSONA_LOCKED",
-                "message": "当前会话已有问答，更换人设请新建会话",
+                "message": "当前会话已有消息，更换人设请打开已有会话或新建会话",
                 "retryable": False,
             },
         )

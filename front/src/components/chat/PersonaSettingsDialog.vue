@@ -15,7 +15,7 @@
         <div class="persona-hero__text">
           <h2 class="persona-hero__title">官方人设</h2>
           <p class="persona-hero__desc">
-            选择并应用到会话 · 内容只读 · 有问答后需新建会话才能更换
+            选择伴侣 · 有关系线则继续，没有则从第一句话开始
           </p>
         </div>
       </div>
@@ -27,10 +27,11 @@
           <span>人设库</span>
           <span class="persona-library__count">{{ items.length }}</span>
         </div>
-        <ul v-if="items.length" class="persona-library__list">
+        <ul v-if="items.length" ref="libraryListRef" class="persona-library__list">
           <li
             v-for="item in items"
             :key="item.id"
+            :data-persona-id="item.id"
             class="persona-library__item"
             :class="{
               'is-active': item.id === selectedId,
@@ -80,6 +81,11 @@
         <section class="persona-block">
           <div class="persona-block__title">身份</div>
           <p class="persona-block__body">{{ selected.identity }}</p>
+        </section>
+
+        <section v-if="selected.motto" class="persona-block">
+          <div class="persona-block__title">座右铭</div>
+          <p class="persona-block__body">{{ selected.motto }}</p>
         </section>
 
         <section class="persona-block">
@@ -171,7 +177,7 @@
         <p class="persona-footer__hint">
           {{
             selected
-              ? `将应用「${selected.name}」到当前工作区`
+              ? `选择「${selected.name}」：已有关系线会继续聊天，没有则进入待开始状态`
               : '请先选择一个人设'
           }}
         </p>
@@ -183,7 +189,7 @@
             :loading="busy"
             @click="applySelected"
           >
-            应用此人设
+            {{ applyLabel }}
           </el-button>
         </div>
       </div>
@@ -192,7 +198,7 @@
 </template>
 
 <script setup>
-import { computed, ref, watch } from 'vue'
+import { computed, nextTick, ref, watch } from 'vue'
 import { ElMessage } from 'element-plus'
 import { User } from '@element-plus/icons-vue'
 import { fetchPersonas } from '@/api/persona'
@@ -217,9 +223,15 @@ const loading = ref(false)
 const busy = ref(false)
 const items = ref([])
 const selectedId = ref('')
+const libraryListRef = ref(null)
 const detailPanelRef = ref(null)
 
 const selected = computed(() => items.value.find((item) => item.id === selectedId.value) || null)
+const applyLabel = computed(() => {
+  if (!selected.value) return '选择伴侣'
+  if (selected.value.id === props.personaId) return '继续当前伴侣'
+  return '选择这位伴侣'
+})
 
 const catchphrases = computed(() =>
   Array.isArray(selected.value?.catchphrases) ? selected.value.catchphrases : [],
@@ -264,11 +276,22 @@ async function loadItems() {
     const prefer =
       items.value.find((item) => item.id === props.personaId) || items.value[0]
     selectedId.value = prefer.id
+    scrollUsingPersonaIntoView()
   } catch (err) {
     ElMessage.error(err?.message || '加载人设失败')
   } finally {
     loading.value = false
   }
+}
+
+async function scrollUsingPersonaIntoView() {
+  await nextTick()
+  const list = libraryListRef.value
+  if (!list) return
+  const target =
+    list.querySelector('.persona-library__item.is-in-use') ||
+    list.querySelector(`[data-persona-id="${selectedId.value}"]`)
+  target?.scrollIntoView?.({ block: 'center' })
 }
 
 function close() {

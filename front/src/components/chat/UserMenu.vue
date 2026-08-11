@@ -79,8 +79,11 @@ function onCommand(command) {
   text-align: left;
   transition: background 0.15s ease;
 
-  &:hover {
-    background: rgba(255, 255, 255, 0.05);
+  &:hover,
+  &:focus,
+  &:focus-visible {
+    outline: none;
+    background: rgba(255, 255, 255, 0.06);
   }
 }
 
@@ -125,35 +128,62 @@ function onCommand(command) {
   width: 100%;
   display: block;
 }
+
+:deep(.el-tooltip__trigger:focus-visible) {
+  outline: none;
+}
 </style>
 
 <style lang="scss">
-.user-menu-popper.el-dropdown__popper {
-  background: #15171c;
-  border: 1px solid #2c303a;
+/* 覆盖 Element Plus 下拉默认浅色 hover/focus，保持侧栏暗色风格 */
+.user-menu-popper.el-dropdown__popper,
+.user-menu-popper.el-popper {
+  --el-bg-color-overlay: #15171c;
+  --el-border-color-light: #2c303a;
+  --el-dropdown-menuItem-hover-fill: rgba(255, 255, 255, 0.08);
+  --el-dropdown-menuItem-hover-color: #f8fafc;
+  --el-text-color-regular: #f3f4f6;
+  background: #15171c !important;
+  border: 1px solid #2c303a !important;
+  box-shadow: 0 10px 28px rgba(0, 0, 0, 0.45);
 
   .el-dropdown-menu {
-    background: #15171c;
-    border: none;
+    background: #15171c !important;
+    border: none !important;
+    padding: 6px;
   }
 
   .el-dropdown-menu__item {
-    color: #f3f4f6;
+    color: #f3f4f6 !important;
     gap: 8px;
+    border-radius: 8px;
+    margin: 0;
 
-    &:hover {
-      background: rgba(255, 255, 255, 0.06);
-      color: #fff;
+    &:hover,
+    &:focus,
+    &:focus-visible,
+    &:not(.is-disabled):hover,
+    &:not(.is-disabled):focus {
+      background-color: rgba(255, 255, 255, 0.08) !important;
+      color: #fff !important;
     }
   }
 
   .user-menu__logout-item {
     color: #ff8b80 !important;
+
+    &:hover,
+    &:focus,
+    &:not(.is-disabled):hover,
+    &:not(.is-disabled):focus {
+      background-color: rgba(255, 80, 80, 0.12) !important;
+      color: #ffb4ab !important;
+    }
   }
 
   .el-popper__arrow::before {
-    background: #15171c;
-    border: 1px solid #2c303a;
+    background: #15171c !important;
+    border: 1px solid #2c303a !important;
   }
 }
 </style>

@@ -7,6 +7,7 @@ export const PERSONA_CONTENT_KEYS = [
   'region',
   'metaphor',
   'identity',
+  'motto',
   'tone',
   'catchphrases',
   'interests',
@@ -45,6 +46,7 @@ export function normalizePersona(detail) {
     region: (d.region || '').trim(),
     metaphor: (d.metaphor || '').trim(),
     identity: (d.identity || '').trim(),
+    motto: (d.motto || '').trim(),
     tone: (d.tone || '').trim(),
     catchphrases: asList(d.catchphrases),
     interests: (d.interests || '').trim(),
@@ -81,6 +83,7 @@ export function buildPersonaSummary(persona) {
   const lines = []
   if (p.region) lines.push(`地区：${p.region}`)
   if (p.identity) lines.push(`身份：${p.identity}`)
+  if (p.motto) lines.push(`座右铭：${p.motto}`)
   if (p.tone) lines.push(`语气：${p.tone}`)
   if (p.interests) lines.push(`兴趣：${p.interests.replace(/\n/g, ' / ')}`)
   if (p.relationship_boundary) lines.push(`边界：${p.relationship_boundary}`)

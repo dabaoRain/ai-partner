@@ -78,6 +78,7 @@ class Persona(Base):
     # 人设美图：相对站点路径，如 /static/personas/1.jpg
     avatar_url: Mapped[str] = mapped_column(String(255), default="")
     identity: Mapped[str] = mapped_column(Text, default="")
+    motto: Mapped[str] = mapped_column(String(255), default="")
     tone: Mapped[str] = mapped_column(Text, default="")
     # JSON 数组字符串
     catchphrases: Mapped[str] = mapped_column(Text, default="[]")
@@ -118,6 +119,7 @@ class ChatSession(Base):
     age: Mapped[int] = mapped_column(Integer, default=0)
     avatar_url: Mapped[str] = mapped_column(String(255), default="")
     identity: Mapped[str] = mapped_column(Text, default="")
+    motto: Mapped[str] = mapped_column(String(255), default="")
     tone: Mapped[str] = mapped_column(Text, default="")
     catchphrases: Mapped[str] = mapped_column(Text, default="[]")
     interests: Mapped[str] = mapped_column(Text, default="")

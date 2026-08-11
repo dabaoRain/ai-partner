@@ -21,6 +21,7 @@ class PersonaFields(BaseModel):
     region: str = Field(default="", max_length=64)
     metaphor: str = Field(default="", max_length=64)
     identity: str = Field(default="", max_length=1000)
+    motto: str = Field(default="", max_length=255)
     tone: str = Field(default="", max_length=1000)
     # 口头禅：接口可为 list，入库快照时序列化为 JSON 字符串
     catchphrases: list[str] | str = Field(default_factory=list)
@@ -64,9 +65,11 @@ class StopChatRequest(BaseModel):
 
 
 class CreateSessionRequest(BaseModel):
-    """新建会话：指定官方人设 id（缺省用默认人设）。"""
+    """开始/重置与某人设的对话线（一人设一线）。"""
 
     persona_id: str | None = Field(default=None, max_length=64)
+    # True：删除已有同人设会话后重建；False：已有则直接复用
+    reset: bool = False
 
 
 class UpdateSessionPersonaRequest(BaseModel):
@@ -76,9 +79,10 @@ class UpdateSessionPersonaRequest(BaseModel):
 
 
 class CreateSessionResponse(BaseModel):
-    """新建会话出参。"""
+    """开始对话出参。"""
 
     session_id: str
+    reused: bool = False
 
 
 class SessionListItem(BaseModel):
@@ -88,8 +92,10 @@ class SessionListItem(BaseModel):
     name: str
     personality: str = ""
     identity: str = ""
+    motto: str = ""
     tone: str = ""
     region: str = ""
+    avatar_url: str = ""
     persona_id: str | None = None
     created_at: str = ""
     updated_at: str = ""
