@@ -18,6 +18,28 @@ class ChatRequest(BaseModel):
     personality: str = Field(..., min_length=1)
     session_id: str = Field(..., min_length=1)
     history: list[ChatMessage] = Field(default_factory=list)
+    # 客户端幂等键：同一请求重放/防重复提交
+    client_request_id: str = Field(..., min_length=8, max_length=64)
+
+    @field_validator("client_request_id")
+    @classmethod
+    def validate_client_request_id(cls, value: str) -> str:
+        if not re.fullmatch(r"[A-Za-z0-9_-]+", value):
+            raise ValueError("client_request_id 格式非法")
+        return value
+
+
+class StopChatRequest(BaseModel):
+    """停止生成入参。"""
+
+    client_request_id: str = Field(..., min_length=8, max_length=64)
+
+    @field_validator("client_request_id")
+    @classmethod
+    def validate_client_request_id(cls, value: str) -> str:
+        if not re.fullmatch(r"[A-Za-z0-9_-]+", value):
+            raise ValueError("client_request_id 格式非法")
+        return value
 
 
 class CreateSessionRequest(BaseModel):

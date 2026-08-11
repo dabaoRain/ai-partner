@@ -30,7 +30,10 @@
         </div>
         <div
           class="chat-panel__bubble"
-          :class="{ 'is-thinking': isThinking(msg, index) }"
+          :class="{
+            'is-thinking': isThinking(msg, index),
+            'is-failed': msg.status === 'failed',
+          }"
         >
           <div v-if="isThinking(msg, index)" class="chat-panel__thinking">
             <span class="chat-panel__thinking-text">思考中</span>
@@ -38,7 +41,24 @@
               <i /><i /><i />
             </span>
           </div>
-          <template v-else>{{ msg.content }}</template>
+          <template v-else>
+            <div v-if="msg.content">{{ msg.content }}</div>
+            <div
+              v-if="msg.status === 'failed' && msg.errorMessage"
+              class="chat-panel__error"
+            >
+              {{ msg.errorMessage }}
+            </div>
+            <button
+              v-if="canRetry(msg, index)"
+              class="chat-panel__retry"
+              type="button"
+              :disabled="sending"
+              @click="$emit('retry', index)"
+            >
+              重试
+            </button>
+          </template>
         </div>
       </div>
     </div>
@@ -65,12 +85,14 @@
         <div class="chat-panel__composer-main">
           <input
             v-if="!voiceMode"
+            ref="inputRef"
             v-model="draft"
             class="chat-panel__text"
             type="text"
             placeholder="请输入您的问题..."
             :disabled="sending"
-            @keyup.enter="handleSend"
+            :aria-disabled="sending"
+            @keydown.enter.prevent="handleSend"
           />
 
           <button
@@ -90,11 +112,20 @@
         </div>
 
         <button
-          v-if="!voiceMode"
+          v-if="sending"
+          class="chat-panel__stop"
+          type="button"
+          title="停止生成"
+          @click="$emit('stop')"
+        >
+          <el-icon :size="18"><VideoPause /></el-icon>
+        </button>
+        <button
+          v-else-if="!voiceMode"
           class="chat-panel__send"
           type="button"
           title="发送"
-          :disabled="sending || !draft.trim()"
+          :disabled="!draft.trim()"
           @click="handleSend"
         >
           <el-icon :size="20"><Promotion /></el-icon>
@@ -114,6 +145,7 @@ import {
   Microphone,
   EditPen,
   Fold,
+  VideoPause,
 } from '@element-plus/icons-vue'
 import { useSpeechRecognition } from '@/composables/useSpeechRecognition'
 import { useAppStore } from '@/store/app'
@@ -133,14 +165,23 @@ const props = defineProps({
   },
 })
 
-const emit = defineEmits(['send'])
+const emit = defineEmits(['send', 'stop', 'retry'])
 const appStore = useAppStore()
 
 const draft = ref('')
 const listRef = ref(null)
+const inputRef = ref(null)
 const voiceMode = ref(false)
 const voiceStartedAt = ref(0)
 const shouldSendVoice = ref(false)
+
+/** 回复结束（成功/失败/停止）后把光标落回输入框 */
+async function focusInput() {
+  if (voiceMode.value || props.sending) return
+  await nextTick()
+  inputRef.value?.focus?.()
+}
+
 
 const { supported, listening, start, stop, cancel } = useSpeechRecognition({
   lang: 'zh-CN',
@@ -167,6 +208,16 @@ function isThinking(msg, index) {
   )
 }
 
+/** 仅最后一条可重试的助手消息展示重试（失败或已停止） */
+function canRetry(msg, index) {
+  return (
+    msg.role === 'assistant' &&
+    msg.retryable &&
+    (msg.status === 'failed' || msg.status === 'cancelled') &&
+    index === props.messages.length - 1
+  )
+}
+
 async function scrollToBottom() {
   await nextTick()
   if (listRef.value) {
@@ -184,6 +235,7 @@ function toggleInputMode() {
 }
 
 function handleSend() {
+  // 生成中禁止再次提问
   if (props.sending || listening.value || voiceMode.value) return
   const text = draft.value.trim()
   if (!text) return
@@ -245,10 +297,14 @@ watch(
 
 watch(
   () => props.sending,
-  (value) => {
+  (value, prev) => {
     if (value && listening.value) {
       shouldSendVoice.value = false
       cancel()
+    }
+    // 从生成中结束：成功、失败或停止后，光标回到输入框
+    if (prev === true && value === false) {
+      focusInput()
     }
   }
 )
@@ -361,6 +417,38 @@ watch(
       min-height: 48px;
       display: flex;
       align-items: center;
+    }
+
+    &.is-failed {
+      border: 1px solid rgba(231, 76, 60, 0.35);
+    }
+  }
+
+  &__error {
+    margin-top: 6px;
+    font-size: 13px;
+    color: #ff8b80;
+  }
+
+  &__retry {
+    margin-top: 10px;
+    height: 30px;
+    padding: 0 12px;
+    border: 1px solid $border-color;
+    border-radius: 8px;
+    background: transparent;
+    color: $text-color;
+    font-size: 13px;
+    cursor: pointer;
+
+    &:hover:not(:disabled) {
+      border-color: $primary-color;
+      color: $primary-soft;
+    }
+
+    &:disabled {
+      opacity: 0.45;
+      cursor: not-allowed;
     }
   }
 
@@ -500,7 +588,8 @@ watch(
     color: #fff;
   }
 
-  &__send {
+  &__send,
+  &__stop {
     width: 40px;
     height: 40px;
     flex-shrink: 0;
@@ -521,6 +610,16 @@ watch(
     &:disabled {
       opacity: 0.35;
       cursor: not-allowed;
+    }
+  }
+
+  &__stop {
+    color: #fff;
+    background: $danger-color;
+
+    &:hover:not(:disabled) {
+      color: #fff;
+      background: #c0392b;
     }
   }
 }

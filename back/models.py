@@ -111,3 +111,23 @@ class ConsentLog(Base):
     consented_at: Mapped[datetime] = mapped_column(DateTime, default=_now)
     session_count: Mapped[int] = mapped_column(Integer, default=0)
     client_meta: Mapped[str] = mapped_column(Text, default="")
+
+
+class ChatRequestLog(Base):
+    """聊天请求幂等与状态记录。"""
+
+    __tablename__ = "chat_request_logs"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    client_request_id: Mapped[str] = mapped_column(String(64), unique=True, index=True)
+    owner_type: Mapped[str] = mapped_column(String(10), index=True)
+    owner_id: Mapped[str] = mapped_column(String(36), index=True)
+    session_id: Mapped[str] = mapped_column(String(32), index=True)
+    # pending | streaming | completed | failed | cancelled
+    status: Mapped[str] = mapped_column(String(20), default="pending", index=True)
+    user_message: Mapped[str] = mapped_column(Text, default="")
+    answer: Mapped[str] = mapped_column(Text, default="")
+    error_code: Mapped[str] = mapped_column(String(64), default="")
+    error_message: Mapped[str] = mapped_column(Text, default="")
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=_now)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=_now, onupdate=_now)

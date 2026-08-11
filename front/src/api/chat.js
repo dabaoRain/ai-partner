@@ -1,8 +1,9 @@
 import request from '@/utils/request'
 import { useUserStore } from '@/store'
+import { ChatStreamError, toChatStreamError } from '@/utils/chatError'
 
 /**
- * 拉取历史会话列表（来自 sessions 目录，最新在前）
+ * 拉取历史会话列表
  */
 export function fetchSessions() {
   return request({
@@ -35,7 +36,7 @@ export function createSession(data) {
 }
 
 /**
- * 删除会话文件
+ * 删除会话
  * @param {string} sessionId
  */
 export function deleteSession(sessionId) {
@@ -46,12 +47,47 @@ export function deleteSession(sessionId) {
 }
 
 /**
+ * 请求服务端停止生成（不走 axios，避免完成后 404 弹全局错误）
+ * @param {string} clientRequestId
+ */
+export async function stopChat(clientRequestId) {
+  const prefix = import.meta.env.VITE_API_PREFIX || '/api'
+  const userStore = useUserStore()
+  const headers = { 'Content-Type': 'application/json' }
+  if (userStore.authToken) {
+    headers.Authorization = `Bearer ${userStore.authToken}`
+  }
+  const response = await fetch(`${prefix}/chat/stop`, {
+    method: 'POST',
+    headers,
+    body: JSON.stringify({ client_request_id: clientRequestId }),
+  })
+  if (!response.ok && response.status !== 404) {
+    throw new Error(`停止失败(${response.status})`)
+  }
+  return response.json().catch(() => ({ ok: true }))
+}
+
+/**
  * 流式发送聊天消息（SSE）
- * @param {{ message: string, name: string, personality: string, session_id: string, history?: Array<{role: string, content: string}> }} data
- * @param {{ onChunk?: (text: string) => void, onDone?: () => void, onError?: (err: Error) => void }} handlers
+ * @param {{
+ *   message: string,
+ *   name: string,
+ *   personality: string,
+ *   session_id: string,
+ *   client_request_id: string,
+ *   history?: Array<{role: string, content: string}>
+ * }} data
+ * @param {{
+ *   signal?: AbortSignal,
+ *   onChunk?: (text: string) => void,
+ *   onStart?: (meta: { client_request_id?: string }) => void,
+ *   onDone?: () => void,
+ *   onError?: (err: ChatStreamError) => void
+ * }} handlers
  */
 export async function sendChatStream(data, handlers = {}) {
-  const { onChunk, onDone, onError } = handlers
+  const { signal, onChunk, onStart, onDone, onError } = handlers
   const prefix = import.meta.env.VITE_API_PREFIX || '/api'
 
   const userStore = useUserStore()
@@ -69,30 +105,45 @@ export async function sendChatStream(data, handlers = {}) {
       method: 'POST',
       headers,
       body: JSON.stringify(data),
+      signal,
     })
   } catch (error) {
-    const err = error instanceof Error ? error : new Error('网络异常')
+    if (error?.name === 'AbortError') {
+      const err = new ChatStreamError('CLIENT_CANCELLED', '已停止生成', false)
+      onError?.(err)
+      throw err
+    }
+    const err = toChatStreamError(null, '网络异常')
+    err.code = 'NETWORK_ERROR'
+    err.retryable = true
     onError?.(err)
     throw err
   }
 
   if (!response.ok) {
     let detail = `请求失败(${response.status})`
+    let parsed = null
     try {
       const body = await response.json()
-      if (typeof body?.detail === 'string') {
-        detail = body.detail
+      parsed = body?.detail
+      if (typeof parsed === 'string') {
+        detail = parsed
+      } else if (parsed && typeof parsed === 'object' && parsed.message) {
+        detail = parsed.message
       }
     } catch {
       // ignore
     }
-    const err = new Error(detail)
+    const err = toChatStreamError(parsed, detail)
+    if (response.status === 409) {
+      err.retryable = false
+    }
     onError?.(err)
     throw err
   }
 
   if (!response.body) {
-    const err = new Error('浏览器不支持流式响应')
+    const err = new ChatStreamError('UNSUPPORTED', '浏览器不支持流式响应', false)
     onError?.(err)
     throw err
   }
@@ -100,6 +151,7 @@ export async function sendChatStream(data, handlers = {}) {
   const reader = response.body.getReader()
   const decoder = new TextDecoder('utf-8')
   let buffer = ''
+  let settled = false
 
   try {
     while (true) {
@@ -119,6 +171,7 @@ export async function sendChatStream(data, handlers = {}) {
 
         const payload = line.slice(5).trim()
         if (payload === '[DONE]') {
+          settled = true
           onDone?.()
           return
         }
@@ -130,8 +183,14 @@ export async function sendChatStream(data, handlers = {}) {
           continue
         }
 
+        if (json.event === 'start') {
+          onStart?.(json)
+          continue
+        }
+
         if (json.error) {
-          const err = new Error(json.error)
+          const err = toChatStreamError(json.error, '流式回复失败')
+          settled = true
           onError?.(err)
           throw err
         }
@@ -142,12 +201,27 @@ export async function sendChatStream(data, handlers = {}) {
       }
     }
 
+    if (!settled) {
+      // 连接正常结束但未收到 DONE：视为断流
+      const err = new ChatStreamError(
+        'STREAM_INTERRUPTED',
+        '连接中断，请重试',
+        true,
+      )
+      onError?.(err)
+      throw err
+    }
     onDone?.()
   } catch (error) {
-    if (error instanceof Error && error.message) {
+    if (error instanceof ChatStreamError) {
       throw error
     }
-    const err = new Error('流式读取失败')
+    if (error?.name === 'AbortError') {
+      const err = new ChatStreamError('CLIENT_CANCELLED', '已停止生成', false)
+      onError?.(err)
+      throw err
+    }
+    const err = new ChatStreamError('STREAM_INTERRUPTED', '流式读取失败', true)
     onError?.(err)
     throw err
   }

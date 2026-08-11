@@ -33,6 +33,8 @@
       :messages="activeMessages"
       :sending="sending"
       @send="sendMessage"
+      @stop="stopGeneration"
+      @retry="retryMessage"
     />
   </div>
 </template>
@@ -48,12 +50,14 @@ import { useUserStore } from "@/store";
 import { useWindowSize } from "@/composables/useWindowSize";
 import { ensureAuthReady } from "@/utils/authBootstrap";
 import { claimGuest, logout as logoutApi } from "@/api/auth";
+import { ChatStreamError } from "@/utils/chatError";
 import {
   createSession as createSessionApi,
   deleteSession,
   fetchSessionDetail,
   fetchSessions,
   sendChatStream,
+  stopChat,
 } from "@/api/chat";
 
 const appStore = useAppStore();
@@ -69,6 +73,11 @@ const sending = ref(false);
 /** 是否已进入聊天主界面（已登录用户启动时直接为 true） */
 const appReady = ref(false);
 const bootstrapping = ref(true);
+
+/** 当前进行中的流式请求控制 */
+const activeAbort = ref(null);
+const activeRequestId = ref("");
+const stopRequested = ref(false);
 
 const activeMessages = computed(() => {
   const current = sessions.value.find(
@@ -201,8 +210,35 @@ async function removeSession(id) {
   }
 }
 
-async function sendMessage(text) {
+function newClientRequestId() {
+  if (typeof crypto !== "undefined" && crypto.randomUUID) {
+    return crypto.randomUUID();
+  }
+  return `req_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`;
+}
+
+async function stopGeneration() {
+  if (!sending.value) return;
+  stopRequested.value = true;
+  const requestId = activeRequestId.value;
+  if (requestId) {
+    try {
+      await stopChat(requestId);
+    } catch (error) {
+      console.error(error);
+    }
+  }
+  activeAbort.value?.abort();
+}
+
+/**
+ * 发送消息；reuseUser=true 时不重复插入用户气泡（用于重试）。
+ */
+async function sendMessage(text, options = {}) {
   if (sending.value) return;
+
+  const reuseUser = Boolean(options.reuseUser);
+  const clientRequestId = options.clientRequestId || newClientRequestId();
 
   try {
     if (!activeSessionId.value) {
@@ -218,8 +254,14 @@ async function sendMessage(text) {
   );
   if (!current) return;
 
-  current.messages.push({ role: "user", content: text });
-  current.messages.push({ role: "assistant", content: "" });
+  if (!reuseUser) {
+    current.messages.push({ role: "user", content: text });
+  }
+  current.messages.push({
+    role: "assistant",
+    content: "",
+    status: "streaming",
+  });
   const assistantMsg = current.messages[current.messages.length - 1];
 
   const history = current.messages.slice(0, -2).map((item) => ({
@@ -227,7 +269,12 @@ async function sendMessage(text) {
     content: item.content,
   }));
 
+  const controller = new AbortController();
+  activeAbort.value = controller;
+  activeRequestId.value = clientRequestId;
+  stopRequested.value = false;
   sending.value = true;
+
   try {
     await sendChatStream(
       {
@@ -236,21 +283,80 @@ async function sendMessage(text) {
         personality: personality.value,
         session_id: activeSessionId.value,
         history,
+        client_request_id: clientRequestId,
       },
       {
+        signal: controller.signal,
         onChunk(chunk) {
           assistantMsg.content += chunk;
         },
       },
     );
+    assistantMsg.status = "done";
     await loadSessions();
   } catch (error) {
-    current.messages.splice(-2, 2);
-    ElMessage.error(error?.message || "流式回复失败");
+    const chatErr =
+      error instanceof ChatStreamError
+        ? error
+        : new ChatStreamError("UNKNOWN", error?.message || "流式回复失败", true);
+
+    const cancelled =
+      stopRequested.value || chatErr.code === "CLIENT_CANCELLED";
+
+    if (cancelled) {
+      // 停止时始终保留用户问题；有片段则落库同步，无片段也可重试
+      assistantMsg.status = "cancelled";
+      assistantMsg.retryable = true;
+      assistantMsg.errorMessage = assistantMsg.content
+        ? "已停止生成（已保留已生成内容）"
+        : "已停止生成";
+      ElMessage.info("已停止生成");
+      if (assistantMsg.content) {
+        await loadSessions();
+      }
+    } else if (chatErr.retryable) {
+      assistantMsg.status = "failed";
+      assistantMsg.retryable = true;
+      assistantMsg.errorMessage = chatErr.message;
+      ElMessage.error(chatErr.message);
+    } else {
+      // 不可重试失败：仍保留用户问题，避免输入丢失
+      assistantMsg.status = "failed";
+      assistantMsg.retryable = false;
+      assistantMsg.errorMessage = chatErr.message;
+      ElMessage.error(chatErr.message);
+    }
     console.error(error);
   } finally {
     sending.value = false;
+    activeAbort.value = null;
+    activeRequestId.value = "";
+    stopRequested.value = false;
   }
+}
+
+/** 对最后一条失败助手消息重试（不重复插入用户消息） */
+async function retryMessage(assistantIndex) {
+  if (sending.value) return;
+  const current = sessions.value.find(
+    (item) => item.id === activeSessionId.value,
+  );
+  if (!current) return;
+
+  const assistantMsg = current.messages[assistantIndex];
+  const userMsg = current.messages[assistantIndex - 1];
+  if (
+    !assistantMsg ||
+    assistantMsg.role !== "assistant" ||
+    !userMsg ||
+    userMsg.role !== "user"
+  ) {
+    return;
+  }
+
+  const text = userMsg.content;
+  current.messages.splice(assistantIndex, 1);
+  await sendMessage(text, { reuseUser: true });
 }
 
 async function enterChatAsGuest() {

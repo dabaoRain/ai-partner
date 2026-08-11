@@ -38,3 +38,10 @@ CORS_ORIGINS = [item.strip() for item in _cors.split(",") if item.strip()]
 
 # 会话 ID 格式：年月日_时分秒
 SESSION_ID_PATTERN = re.compile(r"^\d{8}_\d{6}$")
+
+# 聊天链路超时（秒）；开启 thinking 时首包可能较久，默认放宽
+CHAT_FIRST_TOKEN_TIMEOUT_SEC = int(os.environ.get("CHAT_FIRST_TOKEN_TIMEOUT_SEC", "90"))
+CHAT_STREAM_TIMEOUT_SEC = int(os.environ.get("CHAT_STREAM_TIMEOUT_SEC", "180"))
+# 上游 HTTP 超时与建连失败重试次数
+CHAT_UPSTREAM_TIMEOUT_SEC = float(os.environ.get("CHAT_UPSTREAM_TIMEOUT_SEC", "120"))
+CHAT_UPSTREAM_MAX_RETRIES = int(os.environ.get("CHAT_UPSTREAM_MAX_RETRIES", "3"))

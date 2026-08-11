@@ -1,11 +1,23 @@
 # DeepSeek 大模型客户端与提示词
-from openai import APIError, OpenAI
+from __future__ import annotations
 
-from config import API_KEY, DEEPSEEK_BASE_URL, DEEPSEEK_MODEL
+import time
+
+from openai import APIConnectionError, APIError, APITimeoutError, OpenAI
+
+from config import (
+    API_KEY,
+    CHAT_UPSTREAM_MAX_RETRIES,
+    CHAT_UPSTREAM_TIMEOUT_SEC,
+    DEEPSEEK_BASE_URL,
+    DEEPSEEK_MODEL,
+)
 
 client = OpenAI(
     api_key=API_KEY,
     base_url=DEEPSEEK_BASE_URL,
+    timeout=CHAT_UPSTREAM_TIMEOUT_SEC,
+    max_retries=0,  # 连接失败由下方业务重试控制
 )
 
 
@@ -17,15 +29,41 @@ def build_system_prompt(name: str, personality: str) -> str:
     )
 
 
+def _is_retryable_upstream(exc: Exception) -> bool:
+    if isinstance(exc, (APIConnectionError, APITimeoutError)):
+        return True
+    text = str(exc).lower()
+    return "connection error" in text or "timeout" in text or "temporarily" in text
+
+
 def create_chat_stream(messages: list[dict]):
-    """创建流式聊天补全；调用失败时抛出 APIError / Exception。"""
-    return client.chat.completions.create(
-        model=DEEPSEEK_MODEL,
-        messages=messages,
-        stream=True,
-        reasoning_effort="high",
-        extra_body={"thinking": {"type": "enabled"}},
-    )
+    """创建流式聊天补全；连接类错误自动有限次重试。"""
+    last_exc: Exception | None = None
+    attempts = max(1, CHAT_UPSTREAM_MAX_RETRIES)
+    for i in range(attempts):
+        try:
+            return client.chat.completions.create(
+                model=DEEPSEEK_MODEL,
+                messages=messages,
+                stream=True,
+                reasoning_effort="high",
+                extra_body={"thinking": {"type": "enabled"}},
+            )
+        except Exception as exc:
+            last_exc = exc
+            if i + 1 >= attempts or not _is_retryable_upstream(exc):
+                raise
+            # 短暂退避后重试
+            time.sleep(0.6 * (i + 1))
+    assert last_exc is not None
+    raise last_exc
 
 
-__all__ = ["APIError", "build_system_prompt", "create_chat_stream", "client"]
+__all__ = [
+    "APIError",
+    "APIConnectionError",
+    "APITimeoutError",
+    "build_system_prompt",
+    "create_chat_stream",
+    "client",
+]
