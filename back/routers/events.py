@@ -32,6 +32,7 @@ CORE_EVENTS = [
     "chat_failed",
     "chat_cancelled",
     "feedback",
+    "persona_rating",
     "session_deleted",
     "account_deleted",
     "app_open",

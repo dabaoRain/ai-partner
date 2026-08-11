@@ -242,3 +242,28 @@ class MessageFeedback(Base):
     rating: Mapped[str] = mapped_column(String(16))  # up | down
     reason: Mapped[str] = mapped_column(Text, default="")
     created_at: Mapped[datetime] = mapped_column(DateTime, default=_now)
+
+
+class PersonaRating(Base):
+    """人设评价（1～5 分 + 备注），用于衡量伴侣整体体验。"""
+
+    __tablename__ = "persona_ratings"
+    __table_args__ = (
+        UniqueConstraint(
+            "owner_type",
+            "owner_id",
+            "persona_id",
+            name="uq_persona_rating_owner_persona",
+        ),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    owner_type: Mapped[str] = mapped_column(String(10), index=True)
+    owner_id: Mapped[str] = mapped_column(String(36), index=True)
+    persona_id: Mapped[str] = mapped_column(
+        String(64), ForeignKey("personas.id", ondelete="CASCADE"), index=True
+    )
+    score: Mapped[int] = mapped_column(Integer)
+    remark: Mapped[str] = mapped_column(Text, default="")
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=_now)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=_now)

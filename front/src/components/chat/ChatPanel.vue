@@ -109,43 +109,36 @@
             >
               重试
             </button>
-            <div
-              v-if="canFeedback(msg, index)"
-              class="chat-panel__feedback"
+            <el-dropdown
+              v-if="canShowMessageActions(msg)"
+              class="chat-panel__message-actions"
+              trigger="click"
+              placement="bottom-end"
+              popper-class="chat-message-action-menu"
+              @command="(action) => $emit('message-action', { index, action })"
+              @click.stop
             >
               <button
                 type="button"
-                class="chat-panel__feedback-btn"
-                :class="{ 'is-active is-up': msg.feedback === 'up' }"
-                title="点赞"
-                aria-label="点赞"
-                :disabled="sending || Boolean(msg.feedback)"
-                @click="$emit('feedback', { index, rating: 'up' })"
+                class="chat-panel__message-more"
+                title="更多操作"
+                @click.stop
               >
-                <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true">
-                  <path
-                    fill="currentColor"
-                    d="M2 21h4V9H2v12zm20-11c0-1.1-.9-2-2-2h-6.31l.95-4.57.03-.32c0-.41-.17-.79-.44-1.06L13.17 1 6.59 7.59C6.22 7.95 6 8.45 6 9v10c0 1.1.9 2 2 2h9c.83 0 1.54-.5 1.84-1.22l3.02-7.05c.09-.23.14-.47.14-.73v-2z"
-                  />
-                </svg>
+                <el-icon :size="16"><MoreFilled /></el-icon>
               </button>
-              <button
-                type="button"
-                class="chat-panel__feedback-btn"
-                :class="{ 'is-active is-down': msg.feedback === 'down' }"
-                title="点踩"
-                aria-label="点踩"
-                :disabled="sending || Boolean(msg.feedback)"
-                @click="$emit('feedback', { index, rating: 'down' })"
-              >
-                <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true">
-                  <path
-                    fill="currentColor"
-                    d="M22 3h-4v12h4V3zM2 14c0 1.1.9 2 2 2h6.31l-.95 4.57-.03.32c0 .41.17.79.44 1.06L9.83 23l6.59-6.59c.36-.36.58-.86.58-1.41V5c0-1.1-.9-2-2-2H6c-.83 0-1.54.5-1.84 1.22L1.14 11.27c-.09.23-.14.47-.14.73v2z"
-                  />
-                </svg>
-              </button>
-            </div>
+              <template #dropdown>
+                <el-dropdown-menu>
+                  <el-dropdown-item
+                    v-if="canRegenerate(index)"
+                    command="regenerate"
+                  >
+                    重新生成
+                  </el-dropdown-item>
+                  <el-dropdown-item command="feedback">反馈这条回复</el-dropdown-item>
+                  <el-dropdown-item command="copy">复制</el-dropdown-item>
+                </el-dropdown-menu>
+              </template>
+            </el-dropdown>
           </template>
         </div>
       </div>
@@ -234,6 +227,7 @@ import {
   EditPen,
   Fold,
   VideoPause,
+  MoreFilled,
 } from '@element-plus/icons-vue'
 import { useSpeechRecognition } from '@/composables/useSpeechRecognition'
 import { useAppStore } from '@/store/app'
@@ -276,7 +270,7 @@ const emit = defineEmits([
   'send',
   'stop',
   'retry',
-  'feedback',
+  'message-action',
 ])
 const appStore = useAppStore()
 
@@ -340,13 +334,23 @@ function canRetry(msg, index) {
   )
 }
 
-/** 已完成的助手回复可反馈 */
-function canFeedback(msg, index) {
+/** AI 回复 hover 时才显示更多操作，避免常驻反馈按钮打断陪伴感 */
+function canShowMessageActions(msg) {
   return (
     msg.role === 'assistant' &&
     msg.content &&
-    (!msg.status || msg.status === 'done' || msg.status === 'cancelled') &&
-    !msg.retryable
+    (!msg.status || msg.status === 'done' || msg.status === 'cancelled')
+  )
+}
+
+function canRegenerate(index) {
+  const msg = props.messages[index]
+  const userMsg = props.messages[index - 1]
+  return (
+    !props.sending &&
+    msg?.role === 'assistant' &&
+    userMsg?.role === 'user' &&
+    index === props.messages.length - 1
   )
 }
 
@@ -595,8 +599,9 @@ watch(
   }
 
   &__bubble {
+    position: relative;
     width: 100%;
-    padding: 14px 16px;
+    padding: 14px 44px 14px 16px;
     border-radius: $radius-lg;
     background: $bubble-color;
     color: $text-color;
@@ -644,59 +649,47 @@ watch(
     }
   }
 
-  &__feedback {
-    margin-top: 10px;
-    display: flex;
-    gap: 8px;
+  &__message-actions {
+    position: absolute;
+    top: 10px;
+    right: 10px;
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.15s ease;
   }
 
-  &__feedback-btn {
-    width: 32px;
-    height: 32px;
-    border: 1px solid $border-color;
-    border-radius: 50%;
+  &__bubble:hover &__message-actions,
+  &__bubble:focus-within &__message-actions {
+    opacity: 1;
+    pointer-events: auto;
+  }
+
+  &__message-more {
+    width: 28px;
+    height: 28px;
+    border: none;
+    border-radius: 8px;
+    padding: 0;
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    background: transparent;
+    background: rgba(255, 255, 255, 0.05);
     color: $text-secondary;
     cursor: pointer;
     transition:
       color 0.15s ease,
-      border-color 0.15s ease,
       background 0.15s ease,
       transform 0.15s ease;
 
-    &:hover:not(:disabled) {
-      color: $text-color;
-      border-color: rgba(255, 255, 255, 0.28);
-      background: rgba(255, 255, 255, 0.04);
+    &:hover,
+    &:focus-visible {
+      color: #fff;
+      background: rgba(255, 255, 255, 0.1);
+      outline: none;
     }
 
-    &:active:not(:disabled) {
+    &:active {
       transform: scale(0.94);
-    }
-
-    &.is-active.is-up {
-      color: #fff;
-      border-color: transparent;
-      background: linear-gradient(135deg, #ff4d1a 0%, #ff8a4a 100%);
-    }
-
-    &.is-active.is-down {
-      color: #fff;
-      border-color: transparent;
-      background: rgba(231, 76, 60, 0.85);
-    }
-
-    &:disabled:not(.is-active) {
-      opacity: 0.4;
-      cursor: not-allowed;
-    }
-
-    &:disabled.is-active {
-      cursor: default;
-      opacity: 1;
     }
   }
 
@@ -873,6 +866,41 @@ watch(
   }
 }
 
+:global(.chat-message-action-menu.el-popper) {
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 10px;
+  background: #20242c;
+  box-shadow: 0 14px 34px rgba(0, 0, 0, 0.38);
+  overflow: hidden;
+}
+
+:global(.chat-message-action-menu .el-popper__arrow::before) {
+  border-color: rgba(255, 255, 255, 0.08);
+  background: #20242c;
+}
+
+:global(.chat-message-action-menu .el-dropdown-menu) {
+  min-width: 138px;
+  padding: 6px;
+  border: none;
+  background: transparent;
+}
+
+:global(.chat-message-action-menu .el-dropdown-menu__item) {
+  height: 36px;
+  border-radius: 7px;
+  padding: 0 12px;
+  color: #e8edf4;
+  font-size: 13px;
+  line-height: 36px;
+}
+
+:global(.chat-message-action-menu .el-dropdown-menu__item:not(.is-disabled):focus),
+:global(.chat-message-action-menu .el-dropdown-menu__item:not(.is-disabled):hover) {
+  background: rgba(255, 90, 42, 0.13);
+  color: #fff;
+}
+
 @keyframes chat-thinking-bounce {
   0%,
   80%,
@@ -916,7 +944,7 @@ watch(
     }
 
     &__bubble {
-      padding: 12px 14px;
+      padding: 12px 42px 12px 14px;
       font-size: 14px;
     }
   }

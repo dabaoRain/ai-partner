@@ -41,7 +41,7 @@
       @send="sendMessage"
       @stop="stopGeneration"
       @retry="retryMessage"
-      @feedback="handleFeedback"
+      @message-action="handleMessageAction"
     />
     <PersonaSettingsDialog
       v-model="personaVisible"
@@ -417,7 +417,40 @@ async function resetSession(id) {
   if (isMobile.value) appStore.closeSidebar();
 }
 
+async function rateSession(id) {
+  const target = sessions.value.find((item) => item.id === id);
+  const name = target?.name || "该伴侣";
+  try {
+    const { value } = await ElMessageBox.prompt(
+      `这次和「${name}」的聊天体验如何？可以写下感受或问题。`,
+      "评价本次聊天",
+      {
+        confirmButtonText: "提交评价",
+        cancelButtonText: "取消",
+        inputPlaceholder: "例如：很像人设 / 回复太机械 / 没有安慰到我 / 上下文不对",
+        inputType: "textarea",
+        customClass: "persona-switch-box",
+      },
+    );
+    await trackClientEvent("session_feedback", {
+      session_id: id,
+      props: {
+        persona_id: target?.personaId || "",
+        persona_name: name,
+        note: value || "",
+      },
+    });
+    ElMessage.success("已收到评价");
+  } catch {
+    // 用户取消
+  }
+}
+
 async function handleSessionAction({ id, command }) {
+  if (command === "rate") {
+    await rateSession(id);
+    return;
+  }
   if (command === "reset") {
     await resetSession(id);
     return;
@@ -581,7 +614,57 @@ async function retryMessage(assistantIndex) {
   await sendMessage(text, { reuseUser: true });
 }
 
-async function handleFeedback({ index, rating }) {
+async function copyMessageContent(content) {
+  const text = (content || "").trim();
+  if (!text) return;
+  try {
+    await navigator.clipboard.writeText(text);
+    ElMessage.success("已复制");
+  } catch (error) {
+    console.error(error);
+    ElMessage.error("复制失败，请手动选择文本复制");
+  }
+}
+
+async function handleMessageAction({ index, action }) {
+  const current = sessions.value.find(
+    (item) => item.id === activeSessionId.value,
+  );
+  if (!current) return;
+  const msg = current.messages[index];
+  if (!msg || msg.role !== "assistant") return;
+
+  if (action === "copy") {
+    await copyMessageContent(msg.content);
+    return;
+  }
+
+  if (action === "regenerate") {
+    await retryMessage(index);
+    return;
+  }
+
+  if (action === "feedback") {
+    try {
+      const { value } = await ElMessageBox.prompt(
+        "请简单说说这条回复哪里不符合预期，帮助我们改进问答体验。",
+        "反馈这条回复",
+        {
+          confirmButtonText: "提交反馈",
+          cancelButtonText: "取消",
+          inputPlaceholder: "例如：不符合人设 / 没理解我 / 太啰嗦 / 情绪支持不好",
+          inputType: "textarea",
+          customClass: "persona-switch-box",
+        },
+      );
+      await handleFeedback({ index, rating: "down", reason: value || "" });
+    } catch {
+      // 用户取消
+    }
+  }
+}
+
+async function handleFeedback({ index, rating, reason = "" }) {
   const current = sessions.value.find(
     (item) => item.id === activeSessionId.value,
   );
@@ -594,10 +677,10 @@ async function handleFeedback({ index, rating }) {
       session_id: activeSessionId.value,
       message_key: `${activeSessionId.value}:${index}`,
       rating,
-      reason: "",
+      reason,
     });
     msg.feedback = rating;
-    ElMessage.success(rating === "up" ? "已点赞" : "已点踩");
+    ElMessage.success("已收到反馈");
   } catch (error) {
     console.error(error);
   }

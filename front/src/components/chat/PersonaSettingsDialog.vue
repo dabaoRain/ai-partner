@@ -13,7 +13,7 @@
           <el-icon :size="20"><User /></el-icon>
         </div>
         <div class="persona-hero__text">
-          <h2 class="persona-hero__title">官方人设</h2>
+          <h2 class="persona-hero__title">官方伴侣</h2>
           <p class="persona-hero__desc">
             选择伴侣 · 有关系线则继续，没有则从第一句话开始
           </p>
@@ -24,7 +24,7 @@
     <div v-loading="loading" class="persona-layout">
       <aside class="persona-library">
         <div class="persona-library__head">
-          <span>人设库</span>
+          <span>伴侣库</span>
           <span class="persona-library__count">{{ items.length }}</span>
         </div>
         <ul v-if="items.length" ref="libraryListRef" class="persona-library__list">
@@ -50,11 +50,11 @@
               <span v-if="item.id === personaId" class="persona-library__badge">使用中</span>
             </div>
             <div class="persona-library__meta">
-              {{ item.region || '官方人设' }}
+              {{ item.region || '官方伴侣' }}
             </div>
           </li>
         </ul>
-        <div v-else class="persona-library__empty">暂无官方人设</div>
+        <div v-else class="persona-library__empty">暂无官方伴侣</div>
       </aside>
 
       <div v-if="selected" ref="detailPanelRef" class="persona-detail">
@@ -169,7 +169,7 @@
           </ul>
         </section>
       </div>
-      <div v-else class="persona-detail persona-detail--empty">请选择左侧人设查看详情</div>
+      <div v-else class="persona-detail persona-detail--empty">请选择左侧伴侣查看详情</div>
     </div>
 
     <template #footer>
@@ -178,10 +178,11 @@
           {{
             selected
               ? `选择「${selected.name}」：已有关系线会继续聊天，没有则进入待开始状态`
-              : '请先选择一个人设'
+              : '请先选择一位伴侣'
           }}
         </p>
         <div class="persona-footer__actions">
+          <el-button :disabled="!selected" @click="openRatingDialog">评价伴侣</el-button>
           <el-button @click="close">关闭</el-button>
           <el-button
             type="primary"
@@ -195,13 +196,63 @@
       </div>
     </template>
   </el-dialog>
+
+  <el-dialog
+    v-model="ratingVisible"
+    width="420px"
+    append-to-body
+    align-center
+    destroy-on-close
+    class="persona-rating-dialog"
+  >
+    <template #header>
+      <div class="persona-rating__head">
+        <div class="persona-rating__title">评价「{{ selected?.name || '这位伴侣' }}」</div>
+        <div class="persona-rating__desc">帮助我们判断这位伴侣是否值得继续优化或保留</div>
+      </div>
+    </template>
+
+    <div class="persona-rating">
+      <div class="persona-rating__label">整体体验评分</div>
+      <el-rate
+        v-model="ratingForm.score"
+        :max="5"
+        :texts="['很差', '较差', '一般', '不错', '很好']"
+        show-text
+        size="large"
+      />
+      <div class="persona-rating__label persona-rating__label--remark">备注信息</div>
+      <el-input
+        v-model="ratingForm.remark"
+        type="textarea"
+        :rows="4"
+        maxlength="500"
+        show-word-limit
+        placeholder="可以写下你喜欢或不喜欢这位伴侣的原因，例如性格、语气、陪伴感、地域特色等"
+      />
+    </div>
+
+    <template #footer>
+      <div class="persona-rating__actions">
+        <el-button @click="ratingVisible = false">取消</el-button>
+        <el-button
+          type="primary"
+          :disabled="!ratingForm.score"
+          :loading="ratingBusy"
+          @click="submitRating"
+        >
+          提交评价
+        </el-button>
+      </div>
+    </template>
+  </el-dialog>
 </template>
 
 <script setup>
 import { computed, nextTick, ref, watch } from 'vue'
 import { ElMessage } from 'element-plus'
 import { User } from '@element-plus/icons-vue'
-import { fetchPersonas } from '@/api/persona'
+import { fetchPersonaRating, fetchPersonas, submitPersonaRating } from '@/api/persona'
 import { normalizePersona } from '@/constants/personaPresets'
 import PersonaAvatar from '@/components/chat/PersonaAvatar.vue'
 
@@ -225,6 +276,12 @@ const items = ref([])
 const selectedId = ref('')
 const libraryListRef = ref(null)
 const detailPanelRef = ref(null)
+const ratingVisible = ref(false)
+const ratingBusy = ref(false)
+const ratingForm = ref({
+  score: 0,
+  remark: '',
+})
 
 const selected = computed(() => items.value.find((item) => item.id === selectedId.value) || null)
 const applyLabel = computed(() => {
@@ -278,7 +335,7 @@ async function loadItems() {
     selectedId.value = prefer.id
     scrollUsingPersonaIntoView()
   } catch (err) {
-    ElMessage.error(err?.message || '加载人设失败')
+    ElMessage.error(err?.message || '加载伴侣失败')
   } finally {
     loading.value = false
   }
@@ -295,7 +352,40 @@ async function scrollUsingPersonaIntoView() {
 }
 
 function close() {
+  ratingVisible.value = false
   emit('update:modelValue', false)
+}
+
+async function openRatingDialog() {
+  if (!selected.value) return
+  ratingForm.value = { score: 0, remark: '' }
+  ratingVisible.value = true
+  try {
+    const data = await fetchPersonaRating(selected.value.id)
+    ratingForm.value = {
+      score: Number(data?.score || 0),
+      remark: data?.remark || '',
+    }
+  } catch (err) {
+    ElMessage.error(err?.message || '加载评价失败')
+  }
+}
+
+async function submitRating() {
+  if (!selected.value || !ratingForm.value.score) return
+  ratingBusy.value = true
+  try {
+    await submitPersonaRating(selected.value.id, {
+      score: ratingForm.value.score,
+      remark: ratingForm.value.remark.trim(),
+    })
+    ElMessage.success('评价已保存')
+    ratingVisible.value = false
+  } catch (err) {
+    ElMessage.error(err?.message || '提交评价失败')
+  } finally {
+    ratingBusy.value = false
+  }
 }
 
 async function applySelected() {
@@ -898,5 +988,100 @@ watch(selectedId, () => {
 .persona-dialog .persona-library__list::-webkit-scrollbar-track,
 .persona-dialog .persona-detail::-webkit-scrollbar-track {
   background: transparent;
+}
+
+.persona-rating-dialog.el-dialog {
+  border-radius: 18px;
+  background: linear-gradient(165deg, rgba(28, 31, 40, 0.98), rgba(15, 17, 22, 0.99));
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  box-shadow: 0 24px 72px rgba(0, 0, 0, 0.55);
+  overflow: hidden;
+}
+
+.persona-rating-dialog .el-dialog__header {
+  margin: 0;
+  padding: 20px 20px 8px;
+}
+
+.persona-rating-dialog .el-dialog__body {
+  padding: 10px 20px 18px;
+}
+
+.persona-rating-dialog .el-dialog__footer {
+  padding: 14px 20px 18px;
+  border-top: 1px solid rgba(255, 255, 255, 0.06);
+  background: rgba(15, 17, 22, 0.98);
+}
+
+.persona-rating-dialog .el-dialog__close {
+  color: $text-secondary;
+}
+
+.persona-rating-dialog .el-textarea__inner {
+  color: $text-color;
+  background: rgba(255, 255, 255, 0.045);
+  border-color: rgba(255, 255, 255, 0.1);
+  box-shadow: none;
+}
+
+.persona-rating-dialog .el-textarea__inner:focus {
+  border-color: rgba(255, 90, 42, 0.72);
+}
+
+.persona-rating-dialog .el-input__count {
+  color: $text-secondary;
+  background: transparent;
+}
+
+.persona-rating-dialog .el-button--default {
+  --el-button-bg-color: #2a2e38;
+  --el-button-border-color: #{$border-color};
+  --el-button-text-color: #{$text-color};
+  background-color: #2a2e38 !important;
+  border-color: $border-color !important;
+  color: $text-color !important;
+}
+
+.persona-rating-dialog .el-button--primary {
+  background-color: $primary-color !important;
+  border-color: $primary-color !important;
+}
+
+.persona-rating {
+  &__head {
+    padding-right: 28px;
+  }
+
+  &__title {
+    font-size: 18px;
+    font-weight: 720;
+    line-height: 1.35;
+    color: $text-color;
+  }
+
+  &__desc {
+    margin-top: 5px;
+    font-size: 12px;
+    line-height: 1.45;
+    color: $text-secondary;
+  }
+
+  &__label {
+    margin-bottom: 10px;
+    font-size: 12px;
+    font-weight: 700;
+    color: $text-secondary;
+    letter-spacing: 0.04em;
+
+    &--remark {
+      margin-top: 20px;
+    }
+  }
+
+  &__actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: 8px;
+  }
 }
 </style>

@@ -46,6 +46,7 @@
             </button>
             <template #dropdown>
               <el-dropdown-menu>
+                <el-dropdown-item command="rate">评价本次聊天</el-dropdown-item>
                 <el-dropdown-item command="reset">清空并重开</el-dropdown-item>
                 <el-dropdown-item command="clear" class="is-danger" divided>
                   清空聊天记录

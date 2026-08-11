@@ -240,6 +240,23 @@ class FeedbackResponse(BaseModel):
     ok: bool = True
 
 
+class PersonaRatingRequest(BaseModel):
+    score: int = Field(..., ge=1, le=5)
+    remark: str = Field(default="", max_length=500)
+
+
+class PersonaRatingResponse(BaseModel):
+    persona_id: str
+    score: int | None = None
+    remark: str = ""
+    updated_at: str = ""
+
+
+class PersonaRatingSubmitResponse(BaseModel):
+    ok: bool = True
+    rating: PersonaRatingResponse
+
+
 class AnalyticsSummaryResponse(BaseModel):
     days: int
     totals: dict[str, int]

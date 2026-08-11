@@ -26,3 +26,20 @@ export function fetchPersona(id) {
     method: 'get',
   })
 }
+
+/** 当前用户对某个人设的评价 */
+export function fetchPersonaRating(id) {
+  return request({
+    url: `/personas/${id}/rating`,
+    method: 'get',
+  })
+}
+
+/** 提交/更新人设评价：1～5 分 + 备注 */
+export function submitPersonaRating(id, data) {
+  return request({
+    url: `/personas/${id}/rating`,
+    method: 'post',
+    data,
+  })
+}
