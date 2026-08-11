@@ -1,5 +1,6 @@
 import axios from 'axios'
 import { ElMessage } from 'element-plus'
+import { useUserStore } from '@/store'
 
 const service = axios.create({
   baseURL: import.meta.env.VITE_API_PREFIX || '/api',
@@ -8,25 +9,44 @@ const service = axios.create({
 
 service.interceptors.request.use(
   (config) => {
-    // 如需鉴权，可在此注入 token
+    const userStore = useUserStore()
+    const token = userStore.authToken
+    if (token) {
+      config.headers = config.headers || {}
+      if (!config.headers.Authorization) {
+        config.headers.Authorization = `Bearer ${token}`
+      }
+    }
     return config
   },
   (error) => Promise.reject(error)
 )
 
 service.interceptors.response.use(
-  (response) => {
-    const res = response.data
-    // 按后端约定调整：默认认为直接返回业务数据
-    return res
-  },
+  (response) => response.data,
   (error) => {
+    const status = error.response?.status
     const detail = error.response?.data?.detail
     const message =
       (typeof detail === 'string' ? detail : null) ||
       error.response?.data?.message ||
       error.message ||
       '请求失败'
+
+    // Access 失效时清登录态；保留 guest。claim/login 的 401 不误清用户会话
+    if (status === 401) {
+      const userStore = useUserStore()
+      const url = String(error.config?.url || '')
+      const skipClear =
+        url.includes('/auth/claim-guest') ||
+        url.includes('/auth/login') ||
+        url.includes('/auth/register') ||
+        url.includes('/auth/guest')
+      if (userStore.accessToken && !skipClear) {
+        userStore.clearUserSession()
+      }
+    }
+
     ElMessage.error(message)
     return Promise.reject(error)
   }

@@ -1,29 +1,37 @@
 # 流式聊天路由
 import json
 import traceback
+from typing import Annotated
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import StreamingResponse
+from sqlalchemy.orm import Session
 
+from auth.deps import get_principal
+from auth.tokens import Principal
 from config import API_KEY
+from db import SessionLocal, get_db
 from llm import APIError, build_system_prompt, create_chat_stream
 from schemas import ChatRequest
-from session_store import read_session_file, save_session_turn
+from session_service import assert_session_owner, save_session_turn
 
 router = APIRouter(tags=["chat"])
 
 
 @router.post("/chat")
-def chat(payload: ChatRequest):
-    """流式聊天：SSE 逐块推送大模型输出，结束后落盘。"""
+def chat(
+    payload: ChatRequest,
+    principal: Annotated[Principal, Depends(get_principal)],
+    db: Annotated[Session, Depends(get_db)],
+):
+    """流式聊天：SSE 推送后落库；先做归属校验。"""
     if not API_KEY:
         raise HTTPException(
             status_code=500,
             detail="未配置 DEEPSEEK_API_KEY，请在 back/.env 中设置或 export 后再启动",
         )
 
-    # 提前校验会话存在，避免流中途才报错
-    read_session_file(payload.session_id)
+    assert_session_owner(db, principal, payload.session_id)
 
     messages = [
         {
@@ -58,13 +66,19 @@ def chat(payload: ChatRequest):
                 yield f"data: {json.dumps({'content': content}, ensure_ascii=False)}\n\n"
 
             answer = "".join(full_parts)
-            save_session_turn(
-                session_id=payload.session_id,
-                name=payload.name,
-                personality=payload.personality,
-                question=payload.message,
-                answer=answer,
-            )
+            # 流结束后使用独立 Session 落库，避免请求 Session 已关闭
+            save_db = SessionLocal()
+            try:
+                save_session_turn(
+                    db=save_db,
+                    session_id=payload.session_id,
+                    name=payload.name,
+                    personality=payload.personality,
+                    question=payload.message,
+                    answer=answer,
+                )
+            finally:
+                save_db.close()
             yield "data: [DONE]\n\n"
         except Exception as exc:
             traceback.print_exc()

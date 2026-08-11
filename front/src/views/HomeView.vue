@@ -1,5 +1,14 @@
 <template>
-  <div class="home-view">
+  <div v-if="bootstrapping" class="home-boot" />
+
+  <!-- 未登录过：展示登录/注册/游客引导页 -->
+  <AuthGate
+    v-else-if="!appReady"
+    @success="onAuthSuccess"
+    @guest="enterChatAsGuest"
+  />
+
+  <div v-else class="home-view">
     <div
       v-if="isMobile && !appStore.sidebarCollapsed"
       class="home-view__mask"
@@ -10,10 +19,14 @@
       v-model:personality="personality"
       :sessions="sessions"
       :active-id="activeSessionId"
+      :is-logged-in="userStore.isLoggedIn"
+      :username="userStore.userInfo?.username || ''"
       :class="{ 'is-open': isMobile && !appStore.sidebarCollapsed }"
       @create="handleCreate"
       @select="handleSelect"
       @remove="removeSession"
+      @open-auth="backToAuthGate"
+      @logout="handleLogout"
     />
     <ChatPanel
       :session-id="activeSessionId"
@@ -26,11 +39,15 @@
 
 <script setup>
 import { computed, onMounted, ref, watch } from "vue";
-import { ElMessage } from "element-plus";
+import { ElMessage, ElMessageBox } from "element-plus";
 import ChatSidebar from "@/components/chat/ChatSidebar.vue";
 import ChatPanel from "@/components/chat/ChatPanel.vue";
+import AuthGate from "@/components/chat/AuthGate.vue";
 import { useAppStore } from "@/store/app";
+import { useUserStore } from "@/store";
 import { useWindowSize } from "@/composables/useWindowSize";
+import { ensureAuthReady } from "@/utils/authBootstrap";
+import { claimGuest, logout as logoutApi } from "@/api/auth";
 import {
   createSession as createSessionApi,
   deleteSession,
@@ -40,6 +57,7 @@ import {
 } from "@/api/chat";
 
 const appStore = useAppStore();
+const userStore = useUserStore();
 const { isMobile } = useWindowSize();
 
 const partnerName = ref("小美");
@@ -48,6 +66,9 @@ const personality = ref("温柔可爱一口台湾腔的台湾妹子");
 const sessions = ref([]);
 const activeSessionId = ref("");
 const sending = ref(false);
+/** 是否已进入聊天主界面（已登录用户启动时直接为 true） */
+const appReady = ref(false);
+const bootstrapping = ref(true);
 
 const activeMessages = computed(() => {
   const current = sessions.value.find(
@@ -56,7 +77,6 @@ const activeMessages = computed(() => {
   return current ? current.messages : [];
 });
 
-// 宽屏强制展开侧栏；切到窄屏时收起
 watch(
   isMobile,
   (mobile) => {
@@ -78,7 +98,6 @@ function mapSessionItem(item, messages = []) {
   };
 }
 
-/** 从后端 sessions 目录同步历史列表（已按时间倒序） */
 async function loadSessions() {
   const list = await fetchSessions();
   const prevActive = activeSessionId.value;
@@ -97,8 +116,15 @@ async function loadSessions() {
   }
 }
 
+async function enterChatWorkspace() {
+  await loadSessions();
+  appReady.value = true;
+  if (!activeSessionId.value && sessions.value.length) {
+    await selectSession(sessions.value[0].id);
+  }
+}
+
 async function createSession() {
-  // 当前会话已存在且还没有任何问答时，不再重复创建
   if (activeSessionId.value) {
     const current = sessions.value.find(
       (item) => item.id === activeSessionId.value,
@@ -162,16 +188,12 @@ async function removeSession(id) {
     return;
   }
   const isActive = activeSessionId.value === id;
-
-  // 先删 sessions 目录下对应文件
   await deleteSession(id);
 
   if (isActive) {
-    // 删的是当前会话：清空选中态与问答列表
     activeSessionId.value = "";
   }
 
-  // 同步历史列表；非当前会话删除时，当前问答通过 messageMap 保留
   await loadSessions();
 
   if (isActive && !sessions.value.length) {
@@ -196,12 +218,10 @@ async function sendMessage(text) {
   );
   if (!current) return;
 
-  // 先写入用户消息，再插入空的 assistant 气泡用于流式追加
   current.messages.push({ role: "user", content: text });
   current.messages.push({ role: "assistant", content: "" });
   const assistantMsg = current.messages[current.messages.length - 1];
 
-  // 历史不含本轮 user/assistant，交给后端拼进 messages
   const history = current.messages.slice(0, -2).map((item) => ({
     role: item.role,
     content: item.content,
@@ -225,7 +245,6 @@ async function sendMessage(text) {
     );
     await loadSessions();
   } catch (error) {
-    // 回滚本轮 user + assistant
     current.messages.splice(-2, 2);
     ElMessage.error(error?.message || "流式回复失败");
     console.error(error);
@@ -234,20 +253,114 @@ async function sendMessage(text) {
   }
 }
 
-onMounted(() => {
-  loadSessions()
-    .then(async () => {
-      if (!activeSessionId.value && sessions.value.length) {
-        await selectSession(sessions.value[0].id);
+async function enterChatAsGuest() {
+  await enterChatWorkspace();
+}
+
+/** 切换登录态前，用当前 guest 凭证统计是否有可合并会话 */
+async function countGuestSessions(guestToken) {
+  if (!guestToken) return 0;
+  if (sessions.value.length > 0 && !userStore.accessToken) {
+    return sessions.value.length;
+  }
+  try {
+    // 此时尚未写入用户 token，interceptor 会带上 guest
+    const list = await fetchSessions();
+    return (list || []).length;
+  } catch {
+    return 0;
+  }
+}
+
+/**
+ * 登录/注册成功：写入凭证，按需合并匿名数据后进入聊天。
+ */
+async function onAuthSuccess(res) {
+  const guestToken = userStore.guestToken;
+  const guestSessionCount = await countGuestSessions(guestToken);
+
+  userStore.setAuthTokens({
+    access_token: res.access_token,
+    refresh_token: res.refresh_token,
+    user: res.user,
+  });
+
+  if (guestToken && guestSessionCount > 0) {
+    try {
+      await ElMessageBox.confirm(
+        "是否将本机匿名体验中的会话合并到当前账号？合并后匿名侧将无法再访问这些会话。",
+        "合并匿名数据",
+        {
+          confirmButtonText: "同意合并",
+          cancelButtonText: "暂不合并",
+          type: "warning",
+          distinguishCancelAndClose: true,
+        },
+      );
+      const claimRes = await claimGuest({
+        guest_token: guestToken,
+        consent: true,
+      });
+      userStore.setGuestToken("");
+      ElMessage.success(`已合并 ${claimRes.claimed_session_count} 个匿名会话`);
+    } catch (error) {
+      if (error === "cancel" || error === "close") {
+        ElMessage.info("已保留匿名数据与账号隔离，未合并");
+      } else {
+        console.error(error);
       }
-    })
-    .catch((error) => {
-      console.error(error);
-    });
+    }
+  }
+
+  activeSessionId.value = "";
+  sessions.value = [];
+  await enterChatWorkspace();
+}
+
+function backToAuthGate() {
+  // 游客点「登录账号」：回到门禁，保留 guest 以便合并
+  appReady.value = false;
+}
+
+async function handleLogout() {
+  try {
+    if (userStore.refreshToken) {
+      await logoutApi(userStore.refreshToken);
+    }
+  } catch (error) {
+    console.error(error);
+  }
+  userStore.logout();
+  activeSessionId.value = "";
+  sessions.value = [];
+  appReady.value = false;
+  ElMessage.success("已退出登录");
+}
+
+onMounted(async () => {
+  try {
+    // 已登录用户：直接进入聊天；未登录：停留在门禁页，不自动签发游客
+    if (userStore.isLoggedIn) {
+      await ensureAuthReady();
+      await enterChatWorkspace();
+    }
+  } catch (error) {
+    console.error(error);
+    userStore.clearUserSession();
+    appReady.value = false;
+  } finally {
+    bootstrapping.value = false;
+  }
 });
 </script>
 
 <style scoped lang="scss">
+.home-boot {
+  width: 100%;
+  height: 100%;
+  background: $bg-color;
+}
+
 .home-view {
   width: 100%;
   height: 100%;

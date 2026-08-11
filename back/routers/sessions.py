@@ -1,59 +1,68 @@
-# 会话 CRUD 路由
+# 会话 CRUD 路由（按主体隔离）
 import traceback
+from typing import Annotated
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
+from sqlalchemy.orm import Session
 
+from auth.deps import get_principal
+from auth.tokens import Principal
+from db import get_db
 from schemas import (
     CreateSessionRequest,
     CreateSessionResponse,
     SessionDetailResponse,
     SessionListItem,
 )
-from session_store import (
-    create_session_file,
-    delete_session_file,
-    generate_session_id,
-    list_sessions_from_disk,
-    read_session_file,
-    turns_to_messages,
+from session_service import (
+    create_session,
+    delete_session,
+    get_session_detail,
+    list_sessions,
 )
 
 router = APIRouter(tags=["sessions"])
 
 
 @router.get("/sessions", response_model=list[SessionListItem])
-def list_sessions():
-    """历史会话列表：读取 sessions 目录下全部 JSON，最新在前。"""
-    return list_sessions_from_disk()
+def api_list_sessions(
+    principal: Annotated[Principal, Depends(get_principal)],
+    db: Annotated[Session, Depends(get_db)],
+):
+    """历史会话列表：仅当前主体。"""
+    return list_sessions(db, principal)
 
 
 @router.get("/sessions/{session_id}", response_model=SessionDetailResponse)
-def get_session(session_id: str):
-    """会话详情：用于切换历史会话时回填人设与聊天记录。"""
-    data = read_session_file(session_id)
-    return {
-        "session_id": data.get("session_id") or session_id,
-        "name": data.get("name") or "",
-        "personality": data.get("personality") or "",
-        "created_at": data.get("created_at") or "",
-        "updated_at": data.get("updated_at") or "",
-        "messages": turns_to_messages(data.get("turns") or []),
-    }
+def api_get_session(
+    session_id: str,
+    principal: Annotated[Principal, Depends(get_principal)],
+    db: Annotated[Session, Depends(get_db)],
+):
+    """会话详情：归属校验失败返回 404。"""
+    return get_session_detail(db, principal, session_id)
 
 
 @router.delete("/sessions/{session_id}")
-def delete_session(session_id: str):
-    """删除会话文件，与前端历史列表保持一致。"""
-    delete_session_file(session_id)
+def api_delete_session(
+    session_id: str,
+    principal: Annotated[Principal, Depends(get_principal)],
+    db: Annotated[Session, Depends(get_db)],
+):
+    """删除会话。"""
+    delete_session(db, principal, session_id)
     return {"ok": True}
 
 
 @router.post("/sessions", response_model=CreateSessionResponse)
-def create_session(payload: CreateSessionRequest):
-    """新建会话：后端生成 session_id，并创建空的 sessions/{id}.json。"""
-    session_id = generate_session_id()
+def api_create_session(
+    payload: CreateSessionRequest,
+    principal: Annotated[Principal, Depends(get_principal)],
+    db: Annotated[Session, Depends(get_db)],
+):
+    """新建会话并写入归属。"""
     try:
-        create_session_file(session_id, payload.name, payload.personality)
+        session_id = create_session(db, principal, payload.name, payload.personality)
     except Exception as exc:
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=f"创建会话失败: {exc}") from exc

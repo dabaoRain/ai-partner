@@ -1,4 +1,5 @@
 import request from '@/utils/request'
+import { useUserStore } from '@/store'
 
 /**
  * 拉取历史会话列表（来自 sessions 目录，最新在前）
@@ -53,14 +54,20 @@ export async function sendChatStream(data, handlers = {}) {
   const { onChunk, onDone, onError } = handlers
   const prefix = import.meta.env.VITE_API_PREFIX || '/api'
 
+  const userStore = useUserStore()
+  const headers = {
+    'Content-Type': 'application/json',
+    Accept: 'text/event-stream',
+  }
+  if (userStore.authToken) {
+    headers.Authorization = `Bearer ${userStore.authToken}`
+  }
+
   let response
   try {
     response = await fetch(`${prefix}/chat`, {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Accept: 'text/event-stream',
-      },
+      headers,
       body: JSON.stringify(data),
     })
   } catch (error) {
